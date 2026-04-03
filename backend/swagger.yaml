@@ -1,0 +1,1127 @@
+openapi: 3.0.0
+info:
+  title: Colony App API
+  description: A location-based social networking app API
+  version: 1.0.0
+  contact:
+    name: Colony App Support
+    email: support@colonyapp.com
+
+servers:
+  - url: http://localhost:3000
+    description: Development server
+  - url: https://api.colonyapp.com
+    description: Production server
+
+tags:
+  - name: Auth
+    description: Authentication endpoints
+  - name: Profile
+    description: User profile management
+  - name: Location
+    description: Location-based services
+  - name: Stories
+    description: User stories (24hr expiry)
+  - name: Waves
+    description: Wave/friend request system
+  - name: Chat
+    description: Messaging system
+  - name: Groups
+    description: Group management
+
+paths:
+  # ==================== AUTH ====================
+  /auth/signup:
+    post:
+      tags: [Auth]
+      summary: Register new user
+      description: Create a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  minLength: 6
+                  example: password123
+                displayName:
+                  type: string
+                  example: John Doe
+      responses:
+        '201':
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login user
+      description: Authenticate user and get session tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  example: password123
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout user
+      description: Sign out the current user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Logged out successfully
+
+  /auth/user:
+    get:
+      tags: [Auth]
+      summary: Get current user
+      description: Get the authenticated user's details
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    $ref: '#/components/schemas/User'
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset
+      description: Send password reset email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+      responses:
+        '200':
+          description: Reset email sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /auth/profile:
+    patch:
+      tags: [Auth]
+      summary: Update user profile
+      description: Update display name and avatar
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                  example: New Name
+                avatarUrl:
+                  type: string
+                  format: uri
+                  example: https://example.com/avatar.jpg
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    $ref: '#/components/schemas/User'
+
+  # ==================== PROFILE ====================
+  /profile/{userId}:
+    get:
+      tags: [Profile]
+      summary: Get user profile by ID
+      description: Fetch a user's profile by their ID
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  profile:
+                    $ref: '#/components/schemas/UserProfile'
+        '404':
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /profile:
+    patch:
+      tags: [Profile]
+      summary: Update my profile
+      description: Update current user's profile (requires authentication)
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                  example: "John Doe"
+                bio:
+                  type: string
+                  example: "Hello, I'm John!"
+                avatarUrl:
+                  type: string
+                  format: uri
+                  example: "https://example.com/avatar.jpg"
+                locationName:
+                  type: string
+                  example: "Vasant Colony, Rukunpura, Patna"
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  profile:
+                    $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ==================== NEARBY USERS ====================
+  /users/nearby:
+    get:
+      tags: [Location]
+      summary: Get nearby users
+      description: Get users within specified radius (default 5km)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: longitude
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: radius_km
+          in: query
+          schema:
+            type: number
+            default: 5.0
+      responses:
+        '200':
+          description: List of nearby users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NearbyUser'
+
+  # ==================== NEARBY GROUPS ====================
+  /groups/nearby:
+    get:
+      tags: [Groups, Location]
+      summary: Get nearby groups
+      description: Get groups within specified radius
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: longitude
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: radius_km
+          in: query
+          schema:
+            type: number
+            default: 5.0
+      responses:
+        '200':
+          description: List of nearby groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NearbyGroup'
+
+  # ==================== STORIES ====================
+  /stories:
+    get:
+      tags: [Stories]
+      summary: Get active stories
+      description: Get all active stories (not expired)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of active stories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Story'
+    post:
+      tags: [Stories]
+      summary: Create story
+      description: Create a new story (expires in 24 hours)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [media_url]
+              properties:
+                media_url:
+                  type: string
+                  format: uri
+                media_type:
+                  type: string
+                  enum: [image, video]
+                  default: image
+                caption:
+                  type: string
+      responses:
+        '201':
+          description: Story created
+
+  /stories/{storyId}:
+    delete:
+      tags: [Stories]
+      summary: Delete story
+      description: Delete a story
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Story deleted
+
+  # ==================== WAVES ====================
+  /waves:
+    get:
+      tags: [Waves]
+      summary: Get pending waves
+      description: Get all pending waves received by current user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of pending waves
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Wave'
+    post:
+      tags: [Waves]
+      summary: Send wave
+      description: Send a wave to another user
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receiver_id]
+              properties:
+                receiver_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Wave sent
+
+  /waves/{waveId}/respond:
+    patch:
+      tags: [Waves]
+      summary: Respond to wave
+      description: Accept or reject a received wave
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: waveId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [accepted, rejected]
+      responses:
+        '200':
+          description: Wave responded
+
+  /waves/can-chat/{targetUserId}:
+    get:
+      tags: [Waves]
+      summary: Check if can chat
+      description: Check if mutual wave exists with target user
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: targetUserId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Boolean result
+          content:
+            application/json:
+              schema:
+                type: boolean
+
+  # ==================== CONVERSATIONS ====================
+  /conversations:
+    get:
+      tags: [Chat]
+      summary: Get conversations
+      description: Get all conversations for current user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Conversation'
+    post:
+      tags: [Chat]
+      summary: Create conversation
+      description: Get or create a conversation with another user
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [other_user_id]
+              properties:
+                other_user_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Conversation created/retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+
+  # ==================== MESSAGES ====================
+  /conversations/{conversationId}/messages:
+    get:
+      tags: [Chat]
+      summary: Get messages
+      description: Get all messages in a conversation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+    post:
+      tags: [Chat]
+      summary: Send message
+      description: Send a message in a conversation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                media_url:
+                  type: string
+                  format: uri
+                media_type:
+                  type: string
+                  enum: [image, video, audio]
+      responses:
+        '201':
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+
+  # ==================== GROUPS ====================
+  /groups:
+    get:
+      tags: [Groups]
+      summary: Get all groups
+      description: Get all public groups with optional filters
+      parameters:
+      - name: latitude
+        in: query
+        schema:
+          type: number
+      - name: longitude
+        in: query
+        schema:
+          type: number
+      - name: radius
+        in: query
+        schema:
+          type: number
+          default: 5
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: List of groups
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  groups:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Group'
+    post:
+      tags: [Groups]
+      summary: Create group
+      description: Create a new group (requires authentication)
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: "Tech Enthusiasts"
+                description:
+                  type: string
+                  example: "A group for tech lovers"
+                isPrivate:
+                  type: boolean
+                  default: false
+                latitude:
+                  type: number
+                  example: 25.5941
+                longitude:
+                  type: number
+                  example: 85.1376
+                locationName:
+                  type: string
+                  example: "Patna, India"
+      responses:
+        '201':
+          description: Group created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  group:
+                    $ref: '#/components/schemas/Group'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /groups/{groupId}:
+    get:
+      tags: [Groups]
+      summary: Get group by ID
+      description: Get a specific group's details
+      parameters:
+      - name: groupId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Group details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  group:
+                    $ref: '#/components/schemas/Group'
+        '404':
+          description: Group not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /groups/{groupId}/join:
+    post:
+      tags: [Groups]
+      summary: Join group
+      description: Join a group as a member (requires authentication)
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: groupId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Successfully joined group
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '400':
+          description: Already a member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /groups/{groupId}/leave:
+    post:
+      tags: [Groups]
+      summary: Leave group
+      description: Leave a group
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Left group
+
+  /groups/{groupId}/members:
+    get:
+      tags: [Groups]
+      summary: Get group members
+      description: Get all members of a group
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of group members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GroupMember'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        username:
+          type: string
+        full_name:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+        bio:
+          type: string
+        location_text:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+
+    NearbyUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        username:
+          type: string
+        full_name:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+        bio:
+          type: string
+        location_text:
+          type: string
+        distance:
+          type: number
+          description: Distance in kilometers
+
+    NearbyGroup:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        cover_image_url:
+          type: string
+          format: uri
+        location_text:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        is_private:
+          type: boolean
+        member_count:
+          type: integer
+        distance:
+          type: number
+        is_member:
+          type: boolean
+
+    Story:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        media_url:
+          type: string
+          format: uri
+        media_type:
+          type: string
+          enum: [image, video]
+        caption:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        user_id:
+          type: string
+          format: uuid
+        user:
+          $ref: '#/components/schemas/StoryUser'
+
+    StoryUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+
+    Wave:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, accepted, rejected]
+        created_at:
+          type: string
+          format: date-time
+        sender_id:
+          type: string
+          format: uuid
+        sender:
+          $ref: '#/components/schemas/WaveUser'
+
+    WaveUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+        bio:
+          type: string
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        last_message_at:
+          type: string
+          format: date-time
+        user1_id:
+          type: string
+          format: uuid
+        user2_id:
+          type: string
+          format: uuid
+        otherUser:
+          $ref: '#/components/schemas/ConversationUser'
+        lastMessage:
+          $ref: '#/components/schemas/Message'
+        unreadCount:
+          type: integer
+
+    ConversationUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        content:
+          type: string
+        media_url:
+          type: string
+          format: uri
+        media_type:
+          type: string
+          enum: [image, video, audio]
+        is_read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        sender_id:
+          type: string
+          format: uuid
+
+    GroupMember:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [admin, moderator, member]
+        joined_at:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/GroupMemberUser'
+
+    GroupMemberUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+          format: uri
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+        session:
+          type: object
+          properties:
+            accessToken:
+              type: string
+            refreshToken:
+              type: string
+            expiresAt:
+              type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+        error:
+          type: string

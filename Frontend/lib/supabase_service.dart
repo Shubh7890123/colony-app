@@ -1,0 +1,112 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
+
+class SupabaseService {
+  static final SupabaseService _instance = SupabaseService._internal();
+  factory SupabaseService() => _instance;
+  SupabaseService._internal();
+
+  // Supabase credentials from backend/.env
+  static const String supabaseUrl = 'https://hicfazehsmeyobrasaie.supabase.co';
+  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhpY2ZhemVoc21leW9icmFzYWllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1ODUyMjYsImV4cCI6MjA4OTE2MTIyNn0.FVYlgo16fUAg-hYjSWOufHGf5igiPC9PQ4EUfGog0Hg';
+
+  late final SupabaseClient _client;
+  bool _isInitialized = false;
+
+  SupabaseClient get client => _client;
+  bool get isInitialized => _isInitialized;
+
+  // Initialize Supabase
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+
+    try {
+      await Supabase.initialize(
+        url: supabaseUrl,
+        anonKey: supabaseAnonKey,
+        debug: kDebugMode,
+      );
+      _client = Supabase.instance.client;
+      _isInitialized = true;
+      debugPrint('Supabase initialized successfully');
+    } catch (e) {
+      debugPrint('Error initializing Supabase: $e');
+      rethrow;
+    }
+  }
+
+  // Get current user
+  User? get currentUser => _client.auth.currentUser;
+
+  // Get auth state stream
+  Stream<AuthState> get authStateChanges => _client.auth.onAuthStateChange;
+
+  // Check if user is logged in
+  bool get isLoggedIn => currentUser != null;
+
+  // Sign up with email and password
+  Future<AuthResponse> signUp({
+    required String email,
+    required String password,
+    String? displayName,
+  }) async {
+    final response = await _client.auth.signUp(
+      email: email,
+      password: password,
+      data: displayName != null ? {'display_name': displayName} : null,
+    );
+    return response;
+  }
+
+  // Sign in with email and password
+  Future<AuthResponse> signIn({
+    required String email,
+    required String password,
+  }) async {
+    final response = await _client.auth.signInWithPassword(
+      email: email,
+      password: password,
+    );
+    return response;
+  }
+
+  // Sign out
+  Future<void> signOut() async {
+    await _client.auth.signOut();
+  }
+
+  // Reset password
+  Future<void> resetPassword(String email) async {
+    await _client.auth.resetPasswordForEmail(email);
+  }
+
+  // Update user profile
+  Future<UserResponse> updateProfile({
+    String? displayName,
+    String? avatarUrl,
+  }) async {
+    final response = await _client.auth.updateUser(
+      UserAttributes(
+        data: {
+          if (displayName != null) 'display_name': displayName,
+          if (avatarUrl != null) 'avatar_url': avatarUrl,
+        },
+      ),
+    );
+    return response;
+  }
+
+  // Get user display name
+  String? get displayName {
+    final user = currentUser;
+    if (user == null) return null;
+    return user.userMetadata?['display_name'] ?? user.email?.split('@')[0];
+  }
+
+  // Get user avatar URL
+  String? get avatarUrl {
+    final user = currentUser;
+    if (user == null) return null;
+    return user.userMetadata?['avatar_url'];
+  }
+}
