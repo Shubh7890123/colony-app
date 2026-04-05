@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../colony_theme.dart';
 import '../data_service.dart';
 import '../location_service.dart';
 import 'chat_detail_screen.dart';
@@ -69,7 +70,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Wave sent! Waiting for response.' : 'Failed to send wave'),
+          content: Text(
+            success
+                ? 'Wave sent! Waiting for response.'
+                : 'Could not send wave. Both users need location on and must be within 5 km.',
+          ),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
@@ -78,31 +83,38 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = ColonyColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F7ED),
+      backgroundColor: c.scaffold,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF2F7ED),
+        backgroundColor: c.scaffold,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF14471E)),
+          icon: Icon(Icons.arrow_back, color: c.accent),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.more_vert, color: Color(0xFF14471E)),
+            icon: Icon(Icons.more_vert, color: c.accent),
             onPressed: () {},
           ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF1B5A27)))
+          ? Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : const Color(0xFF1B5A27),
+              ),
+            )
           : _userProfile == null
-              ? const Center(child: Text('User not found'))
-              : _buildProfile(),
+              ? Center(child: Text('User not found', style: TextStyle(color: c.primaryText)))
+              : _buildProfile(c),
     );
   }
 
-  Widget _buildProfile() {
+  Widget _buildProfile(ColonyColors c) {
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
@@ -117,15 +129,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFF17F36), Color(0xFF2E6B3B)],
+                  gradient: LinearGradient(
+                    colors: Theme.of(context).brightness == Brightness.dark
+                        ? [const Color(0xFF444444), const Color(0xFF888888)]
+                        : const [Color(0xFFF17F36), Color(0xFF2E6B3B)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                 ),
                 child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF2F7ED),
+                    color: c.scaffold,
                     shape: BoxShape.circle,
                   ),
                   padding: const EdgeInsets.all(3),
@@ -142,10 +156,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           // Name
           Text(
             _userProfile!.displayName ?? _userProfile!.username ?? 'User',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.w900,
-              color: Color(0xFF2C3E30),
+              color: c.primaryText,
             ),
           ),
           const SizedBox(height: 4),
@@ -153,29 +167,37 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           if (_userProfile!.username != null)
             Text(
               '@${_userProfile!.username}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
-                color: Colors.grey,
+                color: c.secondaryText,
                 fontWeight: FontWeight.w500,
               ),
             ),
           const SizedBox(height: 4),
           // Location
           if (_userProfile!.locationText != null)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.location_on, color: Colors.grey, size: 16),
-                const SizedBox(width: 4),
-                Text(
-                  _userProfile!.locationText!,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.location_on, color: c.secondaryText, size: 16),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      _userProfile!.locationText!,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: c.secondaryText,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           const SizedBox(height: 24),
           // Bio
@@ -184,15 +206,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: c.card,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
                 _userProfile!.bio!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
-                  color: Color(0xFF2C3E30),
+                  color: c.primaryText,
                   height: 1.5,
                 ),
               ),
@@ -290,106 +312,113 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ),
           const SizedBox(height: 24),
           // Stats
-          _buildStatsRow(),
+          _buildStatsRow(c),
           const SizedBox(height: 24),
           // Info Card
-          _buildInfoCard(),
+          _buildInfoCard(c),
           const SizedBox(height: 40),
         ],
       ),
     );
   }
 
-  Widget _buildStatsRow() {
+  Widget _buildStatsRow(ColonyColors c) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _buildStatItem('Groups', '0'),
-        Container(height: 40, width: 1, color: Colors.grey.shade300),
-        _buildStatItem('Connections', '0'),
-        Container(height: 40, width: 1, color: Colors.grey.shade300),
-        _buildStatItem('Waves', '0'),
+        _buildStatItem('Groups', '0', c),
+        Container(height: 40, width: 1, color: c.divider),
+        _buildStatItem('Connections', '0', c),
+        Container(height: 40, width: 1, color: c.divider),
+        _buildStatItem('Waves', '0', c),
       ],
     );
   }
 
-  Widget _buildStatItem(String label, String value) {
+  Widget _buildStatItem(String label, String value, ColonyColors c) {
     return Column(
       children: [
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF2C3E30),
+            color: c.primaryText,
           ),
         ),
         const SizedBox(height: 4),
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 12,
-            color: Colors.grey,
+            color: c.secondaryText,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildInfoCard() {
+  Widget _buildInfoCard(ColonyColors c) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: c.card,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'About',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF2C3E30),
+              color: c.primaryText,
             ),
           ),
           const SizedBox(height: 16),
-          _buildInfoRow(Icons.email_outlined, 'Email', _userProfile!.email ?? 'Not available'),
+          _buildInfoRow(
+              Icons.email_outlined, 'Email', _userProfile!.email ?? 'Not available', c),
           if (_userProfile!.locationText != null)
-            _buildInfoRow(Icons.location_on_outlined, 'Location', _userProfile!.locationText!),
+            _buildInfoRow(Icons.location_on_outlined, 'Location',
+                _userProfile!.locationText!, c),
         ],
       ),
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value) {
+  Widget _buildInfoRow(IconData icon, String label, String value, ColonyColors c) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: const Color(0xFF1B5A27), size: 20),
+          Icon(icon, color: c.accent, size: 20),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: c.secondaryText,
+                  ),
                 ),
-              ),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF2C3E30),
-                  fontWeight: FontWeight.w500,
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: c.primaryText,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  softWrap: true,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

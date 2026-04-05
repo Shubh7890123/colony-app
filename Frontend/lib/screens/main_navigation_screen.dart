@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../colony_theme.dart';
 import 'home_screen.dart';
 import 'groups_screen.dart';
 import 'chat_list_screen.dart';
@@ -91,16 +92,19 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = ColonyColors.of(context);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F7ED),
+      backgroundColor: c.scaffold,
       appBar: _currentIndex == 0
           ? AppBar(
-              backgroundColor: const Color(0xFFF2F7ED),
+              backgroundColor: c.scaffold,
               elevation: 0,
-              title: const Text(
+              title: Text(
                 'Colony',
                 style: TextStyle(
-                  color: Color(0xFF14471E),
+                  color: c.accent,
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
                 ),
@@ -109,9 +113,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 Stack(
                   children: [
                     IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                         Icons.notifications_outlined,
-                        color: Color(0xFF14471E),
+                        color: c.accent,
                         size: 28,
                       ),
                       onPressed: _navigateToNotifications,
@@ -152,16 +156,17 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         children: _screens,
       ),
       bottomNavigationBar: Container(
-        color: const Color(0xFFF2F7ED),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+        color: c.scaffold,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: SafeArea(
+          top: false,
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildNavItem(0, Icons.home_filled),
-              _buildNavItem(1, Icons.people_alt),
-              _buildNavItem(2, Icons.chat_bubble),
-              _buildNavItem(3, Icons.person),
+              _buildNavItem(0, Icons.home_outlined, Icons.home, dark),
+              _buildNavItem(1, Icons.people_outline, Icons.people, dark),
+              _buildNavItem(2, Icons.chat_bubble_outline, Icons.chat_bubble, dark),
+              _buildNavItem(3, Icons.person_outline, Icons.person, dark),
             ],
           ),
         ),
@@ -169,25 +174,31 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 
-  Widget _buildNavItem(int index, IconData icon) {
-    bool isActive = _currentIndex == index;
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _currentIndex = index;
-        });
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        decoration: BoxDecoration(
-          color: isActive ? const Color(0xFFA3E9A5) : Colors.transparent,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Icon(
-          icon,
-          color: isActive ? const Color(0xFF14471E) : const Color(0xFF4A554A),
-          size: 28,
+  Widget _buildNavItem(
+    int index,
+    IconData iconOutline,
+    IconData iconFilled,
+    bool dark,
+  ) {
+    final isActive = _currentIndex == index;
+    final c = ColonyColors.of(context);
+    final activeColor = dark ? Colors.white : c.accent;
+    final inactiveColor = dark ? const Color(0xFF777777) : c.iconMuted;
+
+    return Expanded(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => setState(() => _currentIndex = index),
+          customBorder: const CircleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Icon(
+              isActive ? iconFilled : iconOutline,
+              color: isActive ? activeColor : inactiveColor,
+              size: 26,
+            ),
+          ),
         ),
       ),
     );

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import '../colony_theme.dart';
 import '../data_service.dart';
 import '../supabase_service.dart';
 import '../encryption_service.dart';
+import 'user_profile_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String? conversationId;
@@ -37,15 +39,70 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isOtherUserOnline = false;
   DateTime? _otherUserLastSeen;
   UserProfile? _otherUserProfile;
+
+  /// Resolved peer (may be filled from DB when opening chat with only [conversationId]).
+  String? _peerUserId;
   
   // Polling for new messages (fallback for realtime)
   Stream<void>? _pollingStream;
+
+  String get _peerDisplayName {
+    final p = _otherUserProfile;
+    if (p?.displayName != null && p!.displayName!.trim().isNotEmpty) {
+      return p.displayName!;
+    }
+    if (p?.username != null && p!.username!.trim().isNotEmpty) {
+      return p.username!;
+    }
+    return widget.otherUserName;
+  }
+
+  String? get _peerAvatarUrl =>
+      _otherUserProfile?.avatarUrl ?? widget.otherUserAvatar;
 
   @override
   void initState() {
     super.initState();
     _conversationId = widget.conversationId;
+    _peerUserId = widget.otherUserId;
     _initializeEncryption();
+  }
+
+  void _openPeerProfile() {
+    final id = _peerUserId;
+    if (id == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => UserProfileScreen(userId: id),
+      ),
+    );
+  }
+
+  void _showChatOptions() {
+    final c = ColonyColors.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: c.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.person_outline, color: c.accent),
+              title: Text('View profile', style: TextStyle(color: c.primaryText)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openPeerProfile();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _initializeEncryption() async {
@@ -64,10 +121,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _loadOtherUserProfile() async {
-    if (widget.otherUserId == null) return;
-    
+    if (_peerUserId == null) return;
+
     try {
-      final profile = await _dataService.getUserOnlineStatus(widget.otherUserId!);
+      final profile = await _dataService.getUserProfile(_peerUserId!);
       if (mounted && profile != null) {
         setState(() {
           _otherUserProfile = profile;
@@ -94,10 +151,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _checkOnlineStatus() async {
-    if (widget.otherUserId == null || !mounted) return;
+    if (_peerUserId == null || !mounted) return;
     
     try {
-      final profile = await _dataService.getUserOnlineStatus(widget.otherUserId!);
+      final profile = await _dataService.getUserOnlineStatus(_peerUserId!);
       if (mounted && profile != null) {
         setState(() {
           _isOtherUserOnline = profile.isOnline;
@@ -131,7 +188,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         if (newMessages.isNotEmpty) {
           for (final newMessage in newMessages) {
             // Decrypt if needed
-            if (_encryptionReady && widget.otherUserId != null) {
+            if (_encryptionReady && _peerUserId != null) {
               try {
                 if (newMessage.content.startsWith('{') && newMessage.content.contains('ciphertext')) {
                   final encryptedData = newMessage.content;
@@ -226,10 +283,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
 
     // If no conversation ID, try to get or create one
-    if (_conversationId == null && widget.otherUserId != null) {
-      final conv = await _dataService.getOrCreateConversation(widget.otherUserId!);
+    if (_conversationId == null && _peerUserId != null) {
+      final conv = await _dataService.getOrCreateConversation(_peerUserId!);
       if (conv != null) {
         _conversationId = conv.id;
+      }
+    }
+
+    if (_conversationId != null && _peerUserId == null) {
+      final peerId =
+          await _dataService.getOtherParticipantUserId(_conversationId!);
+      if (mounted && peerId != null) {
+        setState(() {
+          _peerUserId = peerId;
+        });
       }
     }
 
@@ -237,7 +304,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       final messages = await _dataService.getMessages(_conversationId!);
       
       // Decrypt messages
-      if (_encryptionReady && widget.otherUserId != null) {
+      if (_encryptionReady && _peerUserId != null) {
         final decryptedMessages = <Message>[];
         for (final msg in messages) {
           try {
@@ -334,11 +401,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       String messageContent = content;
       
       // Encrypt message if encryption is ready
-      if (_encryptionReady && widget.otherUserId != null) {
+      if (_encryptionReady && _peerUserId != null) {
         try {
           final encryptedMsg = await _encryptionService.encryptMessage(
             plaintext: content,
-            recipientId: widget.otherUserId!,
+            recipientId: _peerUserId!,
           );
           messageContent = encryptedMsg.toJson().toString();
         } catch (e) {
@@ -350,7 +417,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       final message = await _dataService.sendMessage(
         conversationId: _conversationId!,
         content: messageContent,
-        targetUserId: widget.otherUserId, // For push notification
+        targetUserId: _peerUserId, // For push notification
       );
 
       if (message != null) {
@@ -420,7 +487,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F7ED),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(80),
         child: _buildAppBar(),
@@ -484,11 +551,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Widget _buildAppBar() {
-    // Get short user ID (first 8 characters)
-    final shortUserId = widget.otherUserId != null
-        ? widget.otherUserId!.substring(0, 8).toUpperCase()
-        : '';
-    
+    final c = ColonyColors.of(context);
+    final username = _otherUserProfile?.username;
+
     // Format last seen time
     String lastSeenText = '';
     if (!_isOtherUserOnline && _otherUserLastSeen != null) {
@@ -514,111 +579,140 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               icon: const Icon(Icons.arrow_back, color: Color(0xFF1E5631)),
               onPressed: () => Navigator.pop(context),
             ),
-            Stack(
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundImage: widget.otherUserAvatar != null
-                      ? NetworkImage(widget.otherUserAvatar!)
-                      : const NetworkImage('https://i.pravatar.cc/150'),
-                ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: _isOtherUserOnline
-                          ? const Color(0xFF25D366) // Green for online
-                          : Colors.grey.shade400,   // Grey for offline
-                      shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0xFFF2F7ED), width: 2),
+            Expanded(
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: _peerUserId != null ? _openPeerProfile : null,
+                  borderRadius: BorderRadius.circular(28),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                    child: Row(
+                      children: [
+                      Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 20,
+                            backgroundImage: _peerAvatarUrl != null
+                                ? NetworkImage(_peerAvatarUrl!)
+                                : const NetworkImage(
+                                    'https://i.pravatar.cc/150',
+                                  ),
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: _isOtherUserOnline
+                                    ? const Color(0xFF25D366)
+                                    : Colors.grey.shade400,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: c.scaffold,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _peerDisplayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF2C3E30),
+                              ),
+                            ),
+                            if (username != null &&
+                                username.trim().isNotEmpty &&
+                                username.trim().toLowerCase() !=
+                                    _peerDisplayName.trim().toLowerCase()) ...[
+                              Text(
+                                '@$username',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                if (_isOtherUserOnline) ...[
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF25D366),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'online',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ] else if (lastSeenText.isNotEmpty) ...[
+                                  Expanded(
+                                    child: Text(
+                                      lastSeenText,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                ],
+                                Icon(
+                                  Icons.lock,
+                                  size: 10,
+                                  color: Colors.grey.shade600,
+                                ),
+                                const SizedBox(width: 2),
+                                Text(
+                                  'E2E',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     ),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        widget.otherUserName,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF2C3E30),
-                        ),
-                      ),
-                      if (shortUserId.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          'ID: $shortUserId',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey.shade600,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      if (_isOtherUserOnline) ...[
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF25D366),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'online',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                      ] else if (lastSeenText.isNotEmpty) ...[
-                        Text(
-                          lastSeenText,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                      ],
-                      Icon(
-                        Icons.lock,
-                        size: 10,
-                        color: Colors.grey.shade600,
-                      ),
-                      const SizedBox(width: 2),
-                      Text(
-                        'E2E',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
               ),
             ),
             IconButton(
               icon: const Icon(Icons.more_vert, color: Color(0xFF2C3E30)),
-              onPressed: () {},
+              onPressed:
+                  _peerUserId != null ? _showChatOptions : null,
             ),
           ],
         ),
@@ -649,7 +743,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              'Messages you send to ${widget.otherUserName} are secured with end-to-end encryption.',
+              'Messages you send to $_peerDisplayName are secured with end-to-end encryption.',
               style: const TextStyle(
                 fontSize: 14,
                 color: Colors.grey,
@@ -659,7 +753,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
           const SizedBox(height: 24),
           Text(
-            'Say hello to ${widget.otherUserName}! 👋',
+            'Say hello to $_peerDisplayName! 👋',
             style: const TextStyle(
               fontSize: 14,
               color: Colors.grey,
@@ -701,7 +795,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               _buildIncomingMsg(
                 message.content,
                 _formatTime(message.createdAt),
-                widget.otherUserAvatar,
+                _peerAvatarUrl,
               ),
             const SizedBox(height: 16),
           ],
@@ -883,6 +977,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Widget _buildMessageInput() {
+    final c = ColonyColors.of(context);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final barBg = dark ? c.card : Colors.white;
+    final fieldBg = dark ? const Color(0xFF1E1E1E) : const Color(0xFFF2F7ED);
+    final iconAccent = dark ? Colors.white : const Color(0xFF1E5631);
+
     return Container(
       padding: EdgeInsets.only(
         left: 20,
@@ -890,13 +990,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         top: 10,
         bottom: MediaQuery.of(context).padding.bottom + 10,
       ),
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: barBg,
         boxShadow: [
           BoxShadow(
-            color: Color(0x0A000000),
+            color: dark ? Colors.black54 : const Color(0x0A000000),
             blurRadius: 10,
-            offset: Offset(0, -2),
+            offset: const Offset(0, -2),
           ),
         ],
       ),
@@ -905,12 +1005,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFFF2F7ED),
+              color: fieldBg,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.add,
-              color: Color(0xFF1E5631),
+              color: iconAccent,
               size: 24,
             ),
           ),
@@ -919,16 +1019,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               decoration: BoxDecoration(
-                color: const Color(0xFFF2F7ED),
+                color: fieldBg,
                 borderRadius: BorderRadius.circular(24),
               ),
               child: TextField(
                 controller: _messageController,
                 maxLines: null,
+                style: TextStyle(color: c.primaryText),
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: 'Type a message...',
-                  hintStyle: TextStyle(color: Colors.grey),
+                  hintStyle: TextStyle(color: c.secondaryText),
                   border: InputBorder.none,
                 ),
                 onSubmitted: (_) => _sendMessage(),

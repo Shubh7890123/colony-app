@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../colony_theme.dart';
 import '../data_service.dart';
 import 'user_profile_screen.dart';
 import 'chat_detail_screen.dart';
@@ -60,35 +61,40 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = ColonyColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F7ED),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF2F7ED),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF14471E)),
+          icon: Icon(Icons.arrow_back, color: c.accent),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
+        title: Text(
           'Notifications',
           style: TextStyle(
-            color: Color(0xFF14471E),
+            color: c.accent,
             fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFF1B5A27)),
+          ? Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white
+                    : const Color(0xFF1B5A27),
+              ),
             )
           : _waves.isEmpty
-              ? _buildEmptyState()
-              : _buildWavesList(),
+              ? _buildEmptyState(c)
+              : _buildWavesList(c),
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(ColonyColors c) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -96,7 +102,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           Icon(
             Icons.notifications_none_outlined,
             size: 80,
-            color: Colors.grey.shade400,
+            color: c.secondaryText,
           ),
           const SizedBox(height: 16),
           Text(
@@ -104,7 +110,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: Colors.grey.shade600,
+              color: c.primaryText,
             ),
           ),
           const SizedBox(height: 8),
@@ -113,7 +119,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
-              color: Colors.grey.shade500,
+              color: c.secondaryText,
             ),
           ),
         ],
@@ -121,18 +127,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Widget _buildWavesList() {
+  Widget _buildWavesList(ColonyColors c) {
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: _waves.length,
       itemBuilder: (context, index) {
         final wave = _waves[index];
-        return _buildWaveCard(wave);
+        return _buildWaveCard(wave, c);
       },
     );
   }
 
-  Widget _buildWaveCard(Wave wave) {
+  Widget _buildWaveCard(Wave wave, ColonyColors c) {
     final sender = wave.sender;
     final senderName = sender?.displayName ?? sender?.username ?? 'Unknown User';
     final senderAvatar = sender?.avatarUrl;
@@ -141,11 +147,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: c.card,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.15),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -186,10 +192,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             Expanded(
                               child: Text(
                                 senderName,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF2C3E30),
+                                  color: c.primaryText,
                                 ),
                               ),
                             ),
@@ -197,7 +203,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               timeAgo,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey.shade500,
+                                color: c.secondaryText,
                               ),
                             ),
                           ],
@@ -215,7 +221,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               'sent you a wave request',
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.grey.shade600,
+                                color: c.secondaryText,
                               ),
                             ),
                           ],
@@ -235,14 +241,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF2F7ED),
+                  color: c.pillBackground,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   sender.bio!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
-                    color: Color(0xFF2C3E30),
+                    color: c.primaryText,
                     fontStyle: FontStyle.italic,
                   ),
                   maxLines: 2,
@@ -278,8 +284,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     icon: const Icon(Icons.check, size: 18),
                     label: const Text('Accept'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1B5A27),
-                      foregroundColor: Colors.white,
+                      backgroundColor: Theme.of(context).brightness ==
+                              Brightness.dark
+                          ? Colors.white
+                          : const Color(0xFF1B5A27),
+                      foregroundColor: Theme.of(context).brightness ==
+                              Brightness.dark
+                          ? Colors.black
+                          : Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),

@@ -9,6 +9,14 @@ class DataService {
 
   final SupabaseClient _client = SupabaseService().client;
 
+  /// Discovery radius cap (must match backend `NEARBY_5KM_AND_WAVES.sql`).
+  static const double maxNearbyRadiusKm = 5.0;
+
+  double _effectiveNearbyRadius(double radiusKm) {
+    final r = radiusKm <= 0 ? maxNearbyRadiusKm : radiusKm;
+    return r > maxNearbyRadiusKm ? maxNearbyRadiusKm : r;
+  }
+
   // ============================================
   // NEARBY USERS
   // ============================================
@@ -16,7 +24,7 @@ class DataService {
   Future<List<NearbyUser>> getNearbyUsers({
     required double latitude,
     required double longitude,
-    double radiusKm = 5.0,
+    double radiusKm = maxNearbyRadiusKm,
   }) async {
     try {
       final response = await _client.rpc(
@@ -24,12 +32,13 @@ class DataService {
         params: {
           'user_lat': latitude,
           'user_lon': longitude,
-          'radius_km': radiusKm,
+          'radius_km': _effectiveNearbyRadius(radiusKm),
         },
       );
 
       return (response as List)
-          .map((json) => NearbyUser.fromJson(json))
+          .map((json) => NearbyUser.fromJson(json as Map<String, dynamic>))
+          .where((u) => u.distance <= maxNearbyRadiusKm + 1e-6)
           .toList();
     } catch (e) {
       print('Error fetching nearby users: $e');
@@ -44,7 +53,7 @@ class DataService {
   Future<List<NearbyGroup>> getNearbyGroups({
     required double latitude,
     required double longitude,
-    double radiusKm = 5.0,
+    double radiusKm = maxNearbyRadiusKm,
   }) async {
     try {
       final response = await _client.rpc(
@@ -52,7 +61,7 @@ class DataService {
         params: {
           'user_lat': latitude,
           'user_lon': longitude,
-          'radius_km': radiusKm,
+          'radius_km': _effectiveNearbyRadius(radiusKm),
         },
       );
 
@@ -85,9 +94,62 @@ class DataService {
             final isMember = groupId != null && myGroupIds.contains(groupId);
             return NearbyGroup.fromJson(json, isMember: isMember);
           })
+          .where((g) => g.distance <= maxNearbyRadiusKm + 1e-6)
           .toList();
     } catch (e) {
       print('Error fetching nearby groups: $e');
+      return [];
+    }
+  }
+
+  /// All groups the current user has joined (any distance; includes private).
+  Future<List<NearbyGroup>> getMyJoinedGroups() async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return [];
+
+      final memberRows = await _client
+          .from('group_members')
+          .select('group_id')
+          .eq('user_id', user.id);
+
+      final ids = (memberRows as List)
+          .map((r) => r['group_id']?.toString())
+          .whereType<String>()
+          .toList();
+      if (ids.isEmpty) return [];
+
+      final groupsData = await _client
+          .from('groups')
+          .select(
+            'id, name, description, category, cover_image_url, location_text, latitude, longitude, is_private',
+          )
+          .inFilter('id', ids);
+
+      final countRows = await _client
+          .from('group_members')
+          .select('group_id')
+          .inFilter('group_id', ids);
+
+      final counts = <String, int>{};
+      for (final r in countRows as List) {
+        final gid = r['group_id']?.toString();
+        if (gid == null) continue;
+        counts[gid] = (counts[gid] ?? 0) + 1;
+      }
+
+      final list = (groupsData as List).map((row) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final id = map['id']?.toString() ?? '';
+        map['member_count'] = counts[id] ?? 0;
+        map['distance'] = 0.0;
+        return NearbyGroup.fromJson(map, isMember: true);
+      }).toList();
+
+      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return list;
+    } catch (e) {
+      print('Error fetching joined groups: $e');
       return [];
     }
   }
@@ -361,6 +423,30 @@ class DataService {
     }
   }
 
+  /// Other participant in a 1:1 conversation (for chat header / profile when only `conversationId` is known).
+  Future<String?> getOtherParticipantUserId(String conversationId) async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return null;
+
+      final row = await _client
+          .from('conversations')
+          .select('user1_id, user2_id')
+          .eq('id', conversationId)
+          .maybeSingle();
+
+      if (row == null) return null;
+      final u1 = row['user1_id']?.toString();
+      final u2 = row['user2_id']?.toString();
+      if (u1 == user.id) return u2;
+      if (u2 == user.id) return u1;
+      return null;
+    } catch (e) {
+      print('Error resolving conversation peer: $e');
+      return null;
+    }
+  }
+
   Future<Conversation?> getOrCreateConversation(String otherUserId) async {
     try {
       final user = _client.auth.currentUser;
@@ -450,7 +536,8 @@ class DataService {
 
       final message = Message.fromJson(response);
 
-      // Send push notification to target user
+      // FCM to the other participant only (they get a push when you send;
+      // you get a push when they reply — same as Telegram-style 1:1 alerts).
       if (targetUserId != null && content.isNotEmpty) {
         // Truncate message for notification preview
         final preview = content.length > 50 ? '${content.substring(0, 50)}...' : content;
@@ -482,6 +569,11 @@ class DataService {
         'user_id': user.id,
       });
       return true;
+    } on PostgrestException catch (e) {
+      // Unique violation — already a member
+      if (e.code == '23505') return true;
+      print('Error joining group: $e');
+      return false;
     } catch (e) {
       print('Error joining group: $e');
       return false;
@@ -558,6 +650,73 @@ class DataService {
     } catch (e) {
       print('Error updating group cover: $e');
       return false;
+    }
+  }
+
+  Future<List<GroupMessage>> getGroupMessages(String groupId) async {
+    try {
+      final response = await _client
+          .from('group_messages')
+          .select('''
+            id,
+            group_id,
+            sender_id,
+            content,
+            created_at,
+            profiles (
+              display_name,
+              username,
+              avatar_url
+            )
+          ''')
+          .eq('group_id', groupId)
+          .order('created_at', ascending: true);
+
+      return (response as List)
+          .map((row) => GroupMessage.fromJson(row as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Error fetching group messages: $e');
+      return [];
+    }
+  }
+
+  Future<GroupMessage?> sendGroupMessage({
+    required String groupId,
+    required String content,
+  }) async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return null;
+
+      final trimmed = content.trim();
+      if (trimmed.isEmpty) return null;
+
+      final response = await _client
+          .from('group_messages')
+          .insert({
+            'group_id': groupId,
+            'sender_id': user.id,
+            'content': trimmed,
+          })
+          .select('''
+            id,
+            group_id,
+            sender_id,
+            content,
+            created_at,
+            profiles (
+              display_name,
+              username,
+              avatar_url
+            )
+          ''')
+          .single();
+
+      return GroupMessage.fromJson(response);
+    } catch (e) {
+      print('Error sending group message: $e');
+      return null;
     }
   }
 
@@ -1110,6 +1269,58 @@ enum MessageStatus {
   sent,      // Single tick - message sent but not delivered
   delivered, // Double tick grey - message delivered
   seen,      // Double tick blue - message seen
+}
+
+class GroupMessage {
+  final String id;
+  final String groupId;
+  final String senderId;
+  final String content;
+  final DateTime createdAt;
+  final String? senderDisplayName;
+  final String? senderUsername;
+  final String? senderAvatarUrl;
+
+  GroupMessage({
+    required this.id,
+    required this.groupId,
+    required this.senderId,
+    required this.content,
+    required this.createdAt,
+    this.senderDisplayName,
+    this.senderUsername,
+    this.senderAvatarUrl,
+  });
+
+  String get senderLabel {
+    final d = senderDisplayName?.trim();
+    if (d != null && d.isNotEmpty) return d;
+    final u = senderUsername?.trim();
+    if (u != null && u.isNotEmpty) return u;
+    return 'Member';
+  }
+
+  factory GroupMessage.fromJson(Map<String, dynamic> json) {
+    dynamic prof = json['profiles'];
+    if (prof is List && prof.isNotEmpty) {
+      prof = prof.first;
+    }
+    Map<String, dynamic>? pmap;
+    if (prof is Map) {
+      pmap = Map<String, dynamic>.from(prof);
+    }
+
+    return GroupMessage(
+      id: json['id'].toString(),
+      groupId: json['group_id'].toString(),
+      senderId: json['sender_id'].toString(),
+      content: json['content'] as String? ?? '',
+      createdAt: DateTime.parse(json['created_at'] as String),
+      senderDisplayName: pmap?['display_name'] as String?,
+      senderUsername: pmap?['username'] as String?,
+      senderAvatarUrl: pmap?['avatar_url'] as String?,
+    );
+  }
 }
 
 class GroupMember {

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'colony_theme.dart';
 import 'supabase_service.dart';
 import 'screens/device_auth_gate.dart';
 import 'notification_service.dart';
+import 'theme_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,23 +19,30 @@ void main() async {
   // Initialize Notification Service
   await NotificationService().initialize();
 
-  runApp(const MyApp());
+  await ThemeController.instance.load();
+
+  runApp(const ColonyApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class ColonyApp extends StatelessWidget {
+  const ColonyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Colony Auth',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1E5631)),
-        useMaterial3: true,
-        fontFamily: 'Inter',
-      ),
-      home: const DeviceAuthGate(),
+    return ListenableBuilder(
+      listenable: ThemeController.instance,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Colony Auth',
+          debugShowCheckedModeBanner: false,
+          theme: ColonyTheme.light,
+          darkTheme: ColonyTheme.dark,
+          themeMode: ThemeController.instance.useDark
+              ? ThemeMode.dark
+              : ThemeMode.light,
+          home: const DeviceAuthGate(),
+        );
+      },
     );
   }
 }

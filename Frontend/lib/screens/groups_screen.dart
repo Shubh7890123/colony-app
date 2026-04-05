@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
+import '../colony_theme.dart';
 import '../data_service.dart';
 import '../location_service.dart';
 import '../supabase_service.dart';
 import '../storage_service.dart';
+import 'group_chat_screen.dart';
 
 class GroupsScreen extends StatefulWidget {
   const GroupsScreen({super.key});
@@ -57,23 +59,19 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
   }
 
   Future<void> _fetchGroups() async {
-    if (_latitude == null || _longitude == null) {
-      setState(() {
-        _isLoading = false;
-      });
-      return;
+    List<NearbyGroup> nearbyGroups = [];
+    if (_latitude != null && _longitude != null) {
+      nearbyGroups = await _dataService.getNearbyGroups(
+        latitude: _latitude!,
+        longitude: _longitude!,
+        radiusKm: DataService.maxNearbyRadiusKm,
+      );
     }
 
-    final nearbyGroups = await _dataService.getNearbyGroups(
-      latitude: _latitude!,
-      longitude: _longitude!,
-      radiusKm: 10.0,
-    );
+    // Always load memberships — do not depend on GPS (fixes empty "My groups").
+    final myGroups = await _dataService.getMyJoinedGroups();
 
-    // Get user's joined groups
-    final userId = SupabaseService().client.auth.currentUser?.id;
-    final myGroups = nearbyGroups.where((g) => g.isMember).toList();
-
+    if (!mounted) return;
     setState(() {
       _nearbyGroups = nearbyGroups;
       _myGroups = myGroups;
@@ -81,15 +79,28 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
     });
   }
 
+  void _openGroupChat(NearbyGroup group) {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (context) => GroupChatScreen(
+          groupId: group.id,
+          groupName: group.name,
+          coverImageUrl: group.coverImageUrl,
+        ),
+      ),
+    ).then((_) => _fetchGroups());
+  }
+
   Future<void> _joinGroup(NearbyGroup group) async {
     final success = await _dataService.joinGroup(group.id);
     if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Successfully joined ${group.name}'),
-          backgroundColor: const Color(0xFF2E6B3B),
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Successfully joined ${group.name}')),
+        );
+        _tabController.animateTo(1);
+      }
       await _fetchGroups();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -105,10 +116,7 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
     final success = await _dataService.leaveGroup(group.id);
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Left ${group.name}'),
-          backgroundColor: const Color(0xFF2E6B3B),
-        ),
+        SnackBar(content: Text('Left ${group.name}')),
       );
       await _fetchGroups();
     } else {
@@ -138,10 +146,7 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
       if (!mounted) return;
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Group cover updated'),
-            backgroundColor: Color(0xFF1B5A27),
-          ),
+          const SnackBar(content: Text('Group cover updated')),
         );
         await _fetchGroups();
       } else {
@@ -174,8 +179,10 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final dc = ColonyColors.of(context);
+          return AlertDialog(
           title: const Text('Create New Group'),
           content: SingleChildScrollView(
             child: Column(
@@ -206,9 +213,9 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                     width: double.infinity,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      color: Colors.white,
+                      color: dc.card,
                       border: Border.all(
-                        color: Colors.grey.withOpacity(0.25),
+                        color: dc.divider.withOpacity(0.5),
                       ),
                     ),
                     child: coverImageUrl != null
@@ -218,7 +225,7 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                               coverImageUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) {
-                                return const Icon(Icons.image, size: 40);
+                                return Icon(Icons.image, size: 40, color: dc.iconMuted);
                               },
                             ),
                           )
@@ -227,16 +234,16 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                             children: [
                               Icon(
                                 isUploadingCover ? Icons.hourglass_empty : Icons.image_outlined,
-                                color: const Color(0xFF1B5A27),
+                                color: dc.outlineButtonFg,
                               ),
                               const SizedBox(height: 8),
                               Text(
                                 isUploadingCover
                                     ? 'Uploading cover...'
                                     : 'Tap to add cover image',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
-                                  color: Colors.grey,
+                                  color: dc.secondaryText,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -314,62 +321,67 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                 );
                 
                 if (success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Group created successfully!'),
-                      backgroundColor: Color(0xFF2E6B3B),
-                    ),
-                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Group created successfully!')),
+                    );
+                    _tabController.animateTo(1);
+                  }
                   await _fetchGroups();
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Failed to create group'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Failed to create group'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1B5A27),
+                backgroundColor: dc.filledButtonBg,
+                foregroundColor: dc.filledButtonFg,
               ),
               child: const Text('Create'),
             ),
           ],
-        ),
+        );
+        },
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final c = ColonyColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F7ED),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(),
+            _buildHeader(c),
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
+                children: [
                   Text(
                     'Find your hive.',
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.w900,
-                      color: Color(0xFF2C3E30),
+                      color: c.primaryText,
                       letterSpacing: -1,
                     ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'Discover local communities or manage the groups you\'ve nurtured.',
                     style: TextStyle(
                       fontSize: 14,
-                      color: Colors.grey,
+                      color: c.secondaryText,
                       height: 1.4,
                     ),
                   ),
@@ -377,20 +389,18 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
               ),
             ),
             const SizedBox(height: 20),
-            _buildTabs(),
+            _buildTabs(c),
             const SizedBox(height: 16),
             Expanded(
               child: _isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        color: Color(0xFF2E6B3B),
-                      ),
+                  ? Center(
+                      child: CircularProgressIndicator(color: c.accent),
                     )
                   : TabBarView(
                       controller: _tabController,
                       children: [
-                        _buildNearbyGroupsList(),
-                        _buildMyGroupsList(),
+                        _buildNearbyGroupsList(c),
+                        _buildMyGroupsList(c),
                       ],
                     ),
             ),
@@ -399,14 +409,14 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _showCreateGroupDialog,
-        backgroundColor: const Color(0xFFA3E9A5),
+        backgroundColor: c.fabBackground,
         elevation: 2,
-        child: const Icon(Icons.add, color: Color(0xFF14471E), size: 30),
+        child: Icon(Icons.add, color: c.fabForeground, size: 30),
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(ColonyColors c) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: Row(
@@ -415,15 +425,15 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
           Expanded(
             child: Row(
               children: [
-                const Icon(Icons.location_on, color: Color(0xFF14471E), size: 18),
+                Icon(Icons.location_on, color: c.primaryText, size: 18),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
                     _locationText,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
-                      color: Color(0xFF14471E),
+                      color: c.primaryText,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -432,7 +442,7 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.refresh, color: Color(0xFF14471E)),
+            icon: Icon(Icons.refresh, color: c.primaryText),
             onPressed: _loadData,
           ),
           StreamBuilder<AuthState>(
@@ -453,29 +463,31 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildTabs() {
+  Widget _buildTabs(ColonyColors c) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: c.segmentedTrack,
         borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: c.divider.withOpacity(c.isDark ? 0.4 : 0.2)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: TabBar(
         controller: _tabController,
         indicator: BoxDecoration(
-          color: Colors.white,
+          color: c.segmentedSelectedBg,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
+            if (!c.isDark)
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
           ],
         ),
-        labelColor: const Color(0xFF2E6B3B),
-        unselectedLabelColor: Colors.grey,
+        labelColor: c.segmentedSelectedFg,
+        unselectedLabelColor: c.segmentedUnselectedFg,
         labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         tabs: const [
           Tab(text: 'Nearby Groups'),
@@ -485,7 +497,7 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildNearbyGroupsList() {
+  Widget _buildNearbyGroupsList(ColonyColors c) {
     if (_nearbyGroups.isEmpty) {
       return Center(
         child: Column(
@@ -520,12 +532,12 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
       itemCount: _nearbyGroups.length,
       itemBuilder: (context, index) {
         final group = _nearbyGroups[index];
-        return _buildGroupCard(group);
+        return _buildGroupCard(c, group);
       },
     );
   }
 
-  Widget _buildMyGroupsList() {
+  Widget _buildMyGroupsList(ColonyColors c) {
     if (_myGroups.isEmpty) {
       return Center(
         child: Column(
@@ -560,21 +572,38 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
       itemCount: _myGroups.length,
       itemBuilder: (context, index) {
         final group = _myGroups[index];
-        return _buildGroupCard(group, isMyGroup: true);
+        return _buildGroupCard(c, group, isMyGroup: true);
       },
     );
   }
 
-  Widget _buildGroupCard(NearbyGroup group, {bool isMyGroup = false}) {
+  Widget _buildGroupCard(ColonyColors c, NearbyGroup group, {bool isMyGroup = false}) {
     final category = group.category ?? 'SOCIAL';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    final tint = c.categoryTint(category);
+    final chipBg = c.isDark ? c.categoryChipBg : tint;
+    final chipFg = c.isDark ? c.categoryChipFg : const Color(0xFF2C3E30);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(30),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
+        onTap: group.isMember
+            ? () => _openGroupChat(group)
+            : () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Join "${group.name}" to open group chat'),
+                  ),
+                );
+              },
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: c.card,
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: c.divider.withOpacity(c.isDark ? 0.45 : 0.15)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (group.coverImageUrl != null)
@@ -587,12 +616,12 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) => Container(
                     height: 160,
-                    color: _getCategoryColor(category).withOpacity(0.3),
+                    color: c.isDark ? c.pillBackground : tint.withOpacity(0.3),
                     child: Center(
                       child: Icon(
                         Icons.group,
                         size: 48,
-                        color: _getCategoryColor(category),
+                        color: c.isDark ? c.primaryText : tint,
                       ),
                     ),
                   ),
@@ -603,15 +632,15 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: _getCategoryColor(category),
+                      color: chipBg,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       category.toUpperCase(),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF2C3E30),
+                        color: chipFg,
                       ),
                     ),
                   ),
@@ -621,12 +650,12 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
           else
             Container(
               height: 100,
-              color: _getCategoryColor(category).withOpacity(0.3),
+              color: c.isDark ? c.pillBackground : tint.withOpacity(0.3),
               child: Center(
                 child: Icon(
                   Icons.group,
                   size: 48,
-                  color: _getCategoryColor(category),
+                  color: c.isDark ? c.primaryText : tint,
                 ),
               ),
             ),
@@ -641,10 +670,10 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                     Expanded(
                       child: Text(
                         group.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF2C3E30),
+                          color: c.primaryText,
                           height: 1.2,
                         ),
                       ),
@@ -652,19 +681,19 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE8F6E8),
+                        color: c.pillBackground,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.location_on, size: 10, color: Color(0xFF14471E)),
+                          Icon(Icons.location_on, size: 10, color: c.primaryText),
                           const SizedBox(width: 4),
                           Text(
                             group.displayDistance,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFF14471E),
+                              color: c.primaryText,
                             ),
                           ),
                         ],
@@ -675,11 +704,11 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Icon(Icons.people, size: 12, color: Colors.grey),
+                    Icon(Icons.people, size: 12, color: c.iconMuted),
                     const SizedBox(width: 4),
                     Text(
                       '${group.memberCount} members',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      style: TextStyle(fontSize: 12, color: c.secondaryText),
                     ),
                   ],
                 ),
@@ -687,9 +716,9 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                   const SizedBox(height: 12),
                   Text(
                     group.description!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: Colors.grey,
+                      color: c.secondaryText,
                       height: 1.4,
                     ),
                     maxLines: 2,
@@ -697,20 +726,48 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                   ),
                 ],
                 const SizedBox(height: 20),
-                if (isMyGroup) ...[
+                if (group.isMember) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _openGroupChat(group),
+                      icon: Icon(Icons.chat_bubble_outline,
+                          color: c.filledButtonFg, size: 20),
+                      label: Text(
+                        'Open group chat',
+                        style: TextStyle(
+                          color: c.filledButtonFg,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: c.filledButtonBg,
+                        foregroundColor: c.filledButtonFg,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (isMyGroup && group.isMember) ...[
                   OutlinedButton.icon(
                     onPressed: () => _updateGroupCover(group),
-                    icon: const Icon(Icons.image_outlined, color: Color(0xFF1B5A27)),
-                    label: const Text(
+                    icon: Icon(Icons.image_outlined, color: c.outlineButtonFg),
+                    label: Text(
                       'Update cover',
                       style: TextStyle(
-                        color: Color(0xFF1B5A27),
+                        color: c.outlineButtonFg,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      side: const BorderSide(color: Color(0xFF1B5A27)),
+                      side: BorderSide(color: c.outlineButtonBorder),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
@@ -730,8 +787,11 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: group.isMember
-                          ? const Color(0xFFE8F6E8)
-                          : const Color(0xFF1A5822),
+                          ? c.secondaryButtonBg
+                          : c.filledButtonBg,
+                      foregroundColor: group.isMember
+                          ? c.secondaryButtonFg
+                          : c.filledButtonFg,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
@@ -742,8 +802,8 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
                       group.isMember ? 'Leave Group' : 'Join Group',
                       style: TextStyle(
                         color: group.isMember
-                            ? const Color(0xFF14471E)
-                            : Colors.white,
+                            ? c.secondaryButtonFg
+                            : c.filledButtonFg,
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
                       ),
@@ -755,25 +815,8 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
           ),
         ],
       ),
+        ),
+      ),
     );
-  }
-
-  Color _getCategoryColor(String category) {
-    switch (category.toUpperCase()) {
-      case 'TECH':
-        return const Color(0xFF7DE6ED);
-      case 'FITNESS':
-        return const Color(0xFFF1B7C9);
-      case 'LIFESTYLE':
-        return const Color(0xFFA3E9A5);
-      case 'ART':
-        return const Color(0xFFE9D5A3);
-      case 'MUSIC':
-        return const Color(0xFFA3C4E9);
-      case 'BUSINESS':
-        return const Color(0xFFE9A3A3);
-      default:
-        return const Color(0xFFA3E9A5);
-    }
   }
 }

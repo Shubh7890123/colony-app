@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../colony_theme.dart';
 import '../data_service.dart';
 import '../supabase_service.dart';
 import 'chat_detail_screen.dart';
+import 'notifications_screen.dart';
 import 'user_profile_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
@@ -14,44 +18,116 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> {
   final DataService _dataService = DataService();
-  
+
   List<Conversation> _conversations = [];
   List<Wave> _pendingWaves = [];
   bool _isLoading = true;
   bool _isLoadingWaves = false;
   String _searchQuery = '';
+  RealtimeChannel? _chatListChannel;
+  Timer? _refreshDebounce;
 
   @override
   void initState() {
     super.initState();
     _loadConversations();
     _loadPendingWaves();
+    _subscribeToChatListRealtime();
   }
 
-  Future<void> _loadConversations() async {
-    setState(() {
-      _isLoading = true;
+  @override
+  void dispose() {
+    _refreshDebounce?.cancel();
+    _chatListChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  void _subscribeToChatListRealtime() {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    _chatListChannel?.unsubscribe();
+    _chatListChannel = Supabase.instance.client.channel('chat_list_$userId');
+
+    void onDbChange(_) {
+      _scheduleChatListRefresh();
+    }
+
+    _chatListChannel!
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'conversations',
+          callback: onDbChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'messages',
+          callback: onDbChange,
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'waves',
+          callback: onDbChange,
+        )
+        .subscribe();
+  }
+
+  void _scheduleChatListRefresh() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 400), () async {
+      if (!mounted) return;
+      await Future.wait([
+        _loadConversations(showSpinner: false),
+        _loadPendingWaves(showSpinner: false),
+      ]);
     });
+  }
+
+  Future<void> _loadConversations({bool showSpinner = true}) async {
+    if (showSpinner) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     final conversations = await _dataService.getConversations();
-    
+
+    if (!mounted) return;
     setState(() {
       _conversations = conversations;
-      _isLoading = false;
+      if (showSpinner) _isLoading = false;
     });
   }
 
-  Future<void> _loadPendingWaves() async {
-    setState(() {
-      _isLoadingWaves = true;
-    });
+  Future<void> _loadPendingWaves({bool showSpinner = true}) async {
+    if (showSpinner) {
+      setState(() {
+        _isLoadingWaves = true;
+      });
+    }
 
     final waves = await _dataService.getPendingWaves();
 
+    if (!mounted) return;
     setState(() {
       _pendingWaves = waves;
-      _isLoadingWaves = false;
+      if (showSpinner) _isLoadingWaves = false;
     });
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+    );
+    if (!mounted) return;
+    await Future.wait([
+      _loadPendingWaves(showSpinner: false),
+      _loadConversations(showSpinner: false),
+    ]);
   }
 
   List<Conversation> get _filteredConversations {
@@ -110,26 +186,25 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = ColonyColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F7ED),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(),
+            _buildHeader(c),
             const SizedBox(height: 20),
-            _buildSearchBar(),
+            _buildSearchBar(c),
             const SizedBox(height: 20),
             Expanded(
               child: _isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        color: Color(0xFF2E6B3B),
-                      ),
+                  ? Center(
+                      child: CircularProgressIndicator(color: c.accent),
                     )
                         : Column(
                             children: [
-                              _buildPendingWavesSection(),
-                              Expanded(child: _buildConversationsList()),
+                              _buildPendingWavesSection(c),
+                              Expanded(child: _buildConversationsList(c)),
                             ],
                           ),
             ),
@@ -140,24 +215,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
         onPressed: () {
           // TODO: Show new message screen to search users
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('New message feature coming soon!'),
-              backgroundColor: Color(0xFF2E6B3B),
-            ),
+            const SnackBar(content: Text('New message feature coming soon!')),
           );
         },
-        backgroundColor: const Color(0xFF1E5631),
+        backgroundColor: c.fabBackground,
         elevation: 2,
-        child: const Icon(Icons.edit_square, color: Colors.white, size: 28),
+        child: Icon(Icons.edit_square, color: c.fabForeground, size: 28),
       ),
     );
   }
 
-  Widget _buildPendingWavesSection() {
+  Widget _buildPendingWavesSection(ColonyColors c) {
     if (_isLoadingWaves) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        child: LinearProgressIndicator(color: Color(0xFF2E6B3B)),
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        child: LinearProgressIndicator(color: c.accent),
       );
     }
 
@@ -170,18 +242,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: c.card,
           borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: c.divider.withOpacity(c.isDark ? 0.45 : 0.2)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Pending waves',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF2C3E30),
+                color: c.primaryText,
               ),
             ),
             const SizedBox(height: 8),
@@ -204,10 +277,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     Expanded(
                       child: Text(
                         senderName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF2C3E30),
+                          color: c.primaryText,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -225,7 +298,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                               await _loadConversations();
                             }
                           },
-                          icon: const Icon(Icons.check, color: Color(0xFF1B5A27)),
+                          icon: Icon(Icons.check, color: c.accent),
                         ),
                         IconButton(
                           tooltip: 'Reject',
@@ -252,78 +325,127 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(ColonyColors c) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
-            children: const [
-              Icon(Icons.location_on, color: Color(0xFF14471E), size: 20),
-              SizedBox(width: 8),
+            children: [
+              Icon(Icons.location_on, color: c.primaryText, size: 20),
+              const SizedBox(width: 8),
               Text(
                 'Colony',
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
-                  color: Color(0xFF14471E),
+                  color: c.primaryText,
                 ),
               ),
             ],
           ),
-          StreamBuilder<AuthState>(
-            stream: SupabaseService().client.auth.onAuthStateChange,
-            builder: (context, snapshot) {
-              final user = snapshot.data?.session?.user;
-              final avatarUrl = user?.userMetadata?['avatar_url'];
-              return GestureDetector(
-                onTap: () {
-                  if (user != null) {
-                    _navigateToUserProfile(user.id);
-                  }
+          Row(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                    icon: Icon(
+                      Icons.notifications_outlined,
+                      color: c.primaryText,
+                      size: 26,
+                    ),
+                    onPressed: _openNotifications,
+                  ),
+                  if (_pendingWaves.isNotEmpty)
+                    Positioned(
+                      right: 4,
+                      top: 4,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        child: Text(
+                          _pendingWaves.length > 99
+                              ? '99+'
+                              : '${_pendingWaves.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 4),
+              StreamBuilder<AuthState>(
+                stream: SupabaseService().client.auth.onAuthStateChange,
+                builder: (context, snapshot) {
+                  final user = snapshot.data?.session?.user;
+                  final avatarUrl = user?.userMetadata?['avatar_url'];
+                  return GestureDetector(
+                    onTap: () {
+                      if (user != null) {
+                        _navigateToUserProfile(user.id);
+                      }
+                    },
+                    child: CircleAvatar(
+                      radius: 16,
+                      backgroundImage: avatarUrl != null
+                          ? NetworkImage(avatarUrl)
+                          : const NetworkImage('https://i.pravatar.cc/150'),
+                    ),
+                  );
                 },
-                child: CircleAvatar(
-                  radius: 16,
-                  backgroundImage: avatarUrl != null
-                      ? NetworkImage(avatarUrl)
-                      : const NetworkImage('https://i.pravatar.cc/150'),
-                ),
-              );
-            },
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSearchBar() {
+  Widget _buildSearchBar(ColonyColors c) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: c.searchBarFill,
           borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: c.divider.withOpacity(c.isDark ? 0.5 : 0.2)),
         ),
         child: TextField(
+          style: TextStyle(color: c.primaryText, fontSize: 14),
           onChanged: (value) {
             setState(() {
               _searchQuery = value;
             });
           },
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'Search conversations...',
-            hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
-            prefixIcon: Icon(Icons.search, color: Colors.grey),
+            hintStyle: TextStyle(color: c.secondaryText, fontSize: 14),
+            prefixIcon: Icon(Icons.search, color: c.iconMuted),
             border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildConversationsList() {
+  Widget _buildConversationsList(ColonyColors c) {
     final conversations = _filteredConversations;
     
     if (conversations.isEmpty) {
@@ -331,31 +453,31 @@ class _ChatListScreenState extends State<ChatListScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
+            Icon(
               Icons.chat_bubble_outline,
               size: 64,
-              color: Colors.grey,
+              color: c.iconMuted,
             ),
             const SizedBox(height: 16),
             Text(
               _searchQuery.isEmpty 
                   ? 'No conversations yet'
                   : 'No conversations found',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
-                color: Colors.grey,
+                color: c.secondaryText,
                 fontWeight: FontWeight.w500,
               ),
             ),
             const SizedBox(height: 8),
             if (_searchQuery.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 40),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
                 child: Text(
                   'Wave at nearby people to start chatting!',
                   style: TextStyle(
                     fontSize: 14,
-                    color: Colors.grey,
+                    color: c.secondaryText,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -367,19 +489,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     return RefreshIndicator(
       onRefresh: _loadConversations,
-      color: const Color(0xFF2E6B3B),
+      color: c.accent,
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         itemCount: conversations.length,
         itemBuilder: (context, index) {
           final conversation = conversations[index];
-          return _buildConversationTile(conversation);
+          return _buildConversationTile(c, conversation);
         },
       ),
     );
   }
 
-  Widget _buildConversationTile(Conversation conversation) {
+  Widget _buildConversationTile(ColonyColors c, Conversation conversation) {
     final otherUser = conversation.otherUser;
     final lastMessage = conversation.lastMessage;
     final displayName = otherUser?.displayName ?? 
@@ -397,7 +519,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: conversation.unreadCount > 0 
-              ? const Color(0xFFE6F3E6) 
+              ? c.unreadRowTint 
               : Colors.transparent,
           borderRadius: BorderRadius.circular(40),
         ),
@@ -431,8 +553,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           shape: BoxShape.circle,
                           border: Border.all(
                             color: conversation.unreadCount > 0 
-                                ? const Color(0xFFE6F3E6) 
-                                : const Color(0xFFF2F7ED),
+                                ? c.unreadRowTint 
+                                : c.scaffold,
                             width: 2,
                           ),
                         ),
@@ -453,10 +575,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       Expanded(
                         child: Text(
                           displayName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFF2C3E30),
+                            color: c.primaryText,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -465,7 +587,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         time,
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.grey.shade600,
+                          color: c.secondaryText,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -480,7 +602,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           lastMessage?.content ?? 'Start a conversation',
                           style: TextStyle(
                             fontSize: 14,
-                            color: Colors.grey.shade600,
+                            color: c.secondaryText,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -490,16 +612,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         Container(
                           margin: const EdgeInsets.only(left: 8),
                           padding: const EdgeInsets.all(6),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF1E5631),
+                          decoration: BoxDecoration(
+                            color: c.unreadBadgeBg,
                             shape: BoxShape.circle,
                           ),
                           child: Text(
                             conversation.unreadCount > 9 
                                 ? '9+' 
                                 : conversation.unreadCount.toString(),
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: c.unreadBadgeFg,
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                             ),

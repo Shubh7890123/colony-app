@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../colony_theme.dart';
 import '../location_service.dart';
 import '../data_service.dart';
-import '../supabase_service.dart';
 import 'user_profile_screen.dart';
 import 'chat_detail_screen.dart';
 
@@ -49,30 +48,27 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      // Try to get existing location first
-      final existingLocation = await _locationService.getUserLocation();
-      
-      if (existingLocation != null) {
+      // Prefer live GPS so nearby lists match your current position (5 km discovery).
+      final result = await _locationService.fetchAndUpdateLocation();
+      if (result.success &&
+          result.latitude != null &&
+          result.longitude != null) {
         setState(() {
-          _userLocation = existingLocation;
-          _isLoadingLocation = false;
+          _userLocation = UserLocation(
+            latitude: result.latitude!,
+            longitude: result.longitude!,
+            locationText: result.locationText ?? 'Unknown',
+          );
         });
       } else {
-        // Fetch new location
-        final result = await _locationService.fetchAndUpdateLocation();
-        if (result.success) {
-          setState(() {
-            _userLocation = UserLocation(
-              latitude: result.latitude!,
-              longitude: result.longitude!,
-              locationText: result.locationText!,
-            );
-          });
-        } else {
-          setState(() {
-            _errorMessage = result.errorMessage;
-          });
-        }
+        final cached = await _locationService.getUserLocation();
+        setState(() {
+          _userLocation = cached;
+          _errorMessage = result.errorMessage ??
+              (cached == null
+                  ? 'Turn on location permission to see people and groups within 5 km.'
+                  : 'Using last saved location. Open location settings for best results.');
+        });
       }
     } catch (e) {
       setState(() {
@@ -96,13 +92,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final users = await _dataService.getNearbyUsers(
       latitude: _userLocation!.latitude,
       longitude: _userLocation!.longitude,
-      radiusKm: 5.0,
+      radiusKm: DataService.maxNearbyRadiusKm,
     );
 
     final groups = await _dataService.getNearbyGroups(
       latitude: _userLocation!.latitude,
       longitude: _userLocation!.longitude,
-      radiusKm: 5.0,
+      radiusKm: DataService.maxNearbyRadiusKm,
     );
 
     setState(() {
@@ -131,10 +127,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = ColonyColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F7ED),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: RefreshIndicator(
+          color: c.accent,
           onRefresh: _refreshAll,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -142,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildHeader(),
+                _buildHeader(c),
                 if (_errorMessage != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 12, bottom: 12),
@@ -165,31 +163,37 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 const SizedBox(height: 20),
-                _buildSearchBar(),
+                _buildSearchBar(c),
                 const SizedBox(height: 30),
-                _buildSectionHeader('Colony Stories', 'VIEW ALL'),
+                _buildSectionHeader(c, 'Colony Stories', 'VIEW ALL'),
                 const SizedBox(height: 15),
-                _buildStoriesList(),
+                _buildStoriesList(c),
                 const SizedBox(height: 30),
-                const Text('Nearby Peoples',
-                    style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2C3E30))),
+                Text(
+                  'Nearby people',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: c.primaryText,
+                  ),
+                ),
                 const SizedBox(height: 15),
-                _buildNearbyPeoplesList(),
+                _buildNearbyPeoplesList(c),
                 const SizedBox(height: 30),
-                _buildSectionHeader('Nearby Groups', 'JOIN NEW'),
+                _buildSectionHeader(c, 'Nearby Groups', 'JOIN NEW'),
                 const SizedBox(height: 15),
-                _buildNearbyGroupsList(),
+                _buildNearbyGroupsList(c),
                 const SizedBox(height: 30),
-                const Text('Community Highlights',
-                    style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2C3E30))),
+                Text(
+                  'Community Highlights',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: c.primaryText,
+                  ),
+                ),
                 const SizedBox(height: 15),
-                _buildCommunityHighlightCard(),
+                _buildCommunityHighlightCard(c),
                 const SizedBox(height: 20),
               ],
             ),
@@ -199,7 +203,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(ColonyColors c) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -208,20 +212,23 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFA3E9A5),
+                color: c.headerBadgeBg,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.location_on, color: Color(0xFF14471E), size: 20),
+              child: Icon(Icons.location_on, color: c.primaryText, size: 20),
             ),
             const SizedBox(width: 12),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Colony',
-                    style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF14471E))),
+                Text(
+                  'Colony',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: c.primaryText,
+                  ),
+                ),
                 if (_isLoadingLocation)
                   const Text('Fetching location...',
                       style: TextStyle(
@@ -253,60 +260,69 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        const Icon(Icons.notifications, color: Color(0xFF14471E)),
+        Icon(Icons.notifications, color: c.primaryText),
       ],
     );
   }
 
-  Widget _buildSearchBar() {
+  Widget _buildSearchBar(ColonyColors c) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: c.searchBarFill,
         borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: c.divider.withOpacity(0.6)),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 10,
-            spreadRadius: 2,
-          ),
+          if (!c.isDark)
+            BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 10,
+              spreadRadius: 2,
+            ),
         ],
       ),
-      child: const TextField(
+      child: TextField(
+        style: TextStyle(color: c.primaryText, fontSize: 14),
         decoration: InputDecoration(
           hintText: 'Search neighbors, groups or events...',
-          hintStyle: TextStyle(color: Colors.grey, fontSize: 14),
-          prefixIcon: Icon(Icons.search, color: Colors.grey),
+          hintStyle: TextStyle(color: c.secondaryText, fontSize: 14),
+          prefixIcon: Icon(Icons.search, color: c.iconMuted),
           border: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
         ),
       ),
     );
   }
 
-  Widget _buildSectionHeader(String title, String action) {
+  Widget _buildSectionHeader(ColonyColors c, String title, String action) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(title,
-            style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF2C3E30))),
-        Text(action,
-            style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF2E6B3B))),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: c.primaryText,
+          ),
+        ),
+        Text(
+          action,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: c.accent,
+          ),
+        ),
       ],
     );
   }
 
-  Widget _buildStoriesList() {
+  Widget _buildStoriesList(ColonyColors c) {
     if (_isLoadingStories) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(20),
-          child: CircularProgressIndicator(color: Color(0xFF1B5A27)),
+          padding: const EdgeInsets.all(20),
+          child: CircularProgressIndicator(color: c.accent),
         ),
       );
     }
@@ -315,24 +331,24 @@ class _HomeScreenState extends State<HomeScreen> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          _buildAddStoryBtn(),
+          _buildAddStoryBtn(c),
           const SizedBox(width: 15),
           if (_stories.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-              child: Text('No stories yet', style: TextStyle(color: Colors.grey)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: Text('No stories yet', style: TextStyle(color: c.secondaryText)),
             )
           else
             ..._stories.map((story) => Padding(
               padding: const EdgeInsets.only(right: 15),
-              child: _buildStoryItem(story),
+              child: _buildStoryItem(c, story),
             )),
         ],
       ),
     );
   }
 
-  Widget _buildAddStoryBtn() {
+  Widget _buildAddStoryBtn(ColonyColors c) {
     return GestureDetector(
       onTap: () {
         // TODO: Implement add story
@@ -349,16 +365,16 @@ class _HomeScreenState extends State<HomeScreen> {
               shape: BoxShape.circle,
               border: Border.all(color: Colors.grey.shade400, width: 2, style: BorderStyle.solid),
             ),
-            child: const Icon(Icons.add, color: Color(0xFF2E6B3B), size: 30),
+            child: Icon(Icons.add, color: c.accent, size: 30),
           ),
           const SizedBox(height: 8),
-          const Text('Add Story', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          Text('Add Story', style: TextStyle(fontSize: 12, color: c.secondaryText)),
         ],
       ),
     );
   }
 
-  Widget _buildStoryItem(Story story) {
+  Widget _buildStoryItem(ColonyColors c, Story story) {
     return GestureDetector(
       onTap: () {
         // TODO: View story
@@ -383,19 +399,23 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 8),
           Text(
             story.user.username ?? story.user.displayName ?? 'User',
-            style: const TextStyle(fontSize: 12, color: Color(0xFF2C3E30), fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 12,
+              color: c.primaryText,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildNearbyPeoplesList() {
+  Widget _buildNearbyPeoplesList(ColonyColors c) {
     if (_isLoadingUsers) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(20),
-          child: CircularProgressIndicator(color: Color(0xFF1B5A27)),
+          padding: const EdgeInsets.all(20),
+          child: CircularProgressIndicator(color: c.accent),
         ),
       );
     }
@@ -405,13 +425,13 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            const Icon(Icons.people_outline, size: 48, color: Colors.grey),
+            Icon(Icons.people_outline, size: 48, color: c.iconMuted),
             const SizedBox(height: 10),
             Text(
               _userLocation == null 
                   ? 'Enable location to see nearby people'
                   : 'No people found within 5km',
-              style: const TextStyle(color: Colors.grey),
+              style: TextStyle(color: c.secondaryText),
             ),
           ],
         ),
@@ -438,12 +458,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildNearbyGroupsList() {
+  Widget _buildNearbyGroupsList(ColonyColors c) {
     if (_isLoadingGroups) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(20),
-          child: CircularProgressIndicator(color: Color(0xFF1B5A27)),
+          padding: const EdgeInsets.all(20),
+          child: CircularProgressIndicator(color: c.accent),
         ),
       );
     }
@@ -453,13 +473,13 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            const Icon(Icons.group_outlined, size: 48, color: Colors.grey),
+            Icon(Icons.group_outlined, size: 48, color: c.iconMuted),
             const SizedBox(height: 10),
             Text(
               _userLocation == null 
                   ? 'Enable location to see nearby groups'
                   : 'No groups found within 5km',
-              style: const TextStyle(color: Colors.grey),
+              style: TextStyle(color: c.secondaryText),
             ),
           ],
         ),
@@ -470,17 +490,18 @@ class _HomeScreenState extends State<HomeScreen> {
       children: _nearbyGroups.take(3).map((group) {
         return Padding(
           padding: const EdgeInsets.only(bottom: 15),
-          child: _buildGroupCard(group),
+          child: _buildGroupCard(c, group),
         );
       }).toList(),
     );
   }
 
-  Widget _buildGroupCard(NearbyGroup group) {
+  Widget _buildGroupCard(ColonyColors c, NearbyGroup group) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: c.card,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: c.divider.withOpacity(c.isDark ? 0.5 : 0.25)),
       ),
       padding: const EdgeInsets.all(16),
       child: Row(
@@ -490,14 +511,14 @@ class _HomeScreenState extends State<HomeScreen> {
             height: 60,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              color: const Color(0xFFE8F2E4),
+              color: c.pillBackground,
             ),
             child: group.coverImageUrl != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(16),
                     child: Image.network(group.coverImageUrl!, fit: BoxFit.cover),
                   )
-                : const Icon(Icons.group, color: Color(0xFF1B5A27), size: 30),
+                : Icon(Icons.group, color: c.primaryText, size: 30),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -509,28 +530,39 @@ class _HomeScreenState extends State<HomeScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFA3E9A5),
+                        color: c.categoryChipBg,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         group.category?.toUpperCase() ?? 'GROUP',
-                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF14471E)),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: c.categoryChipFg,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Icon(Icons.location_on, size: 12, color: Colors.grey.shade600),
-                    Text(group.displayDistance, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                    Icon(Icons.location_on, size: 12, color: c.iconMuted),
+                    Text(
+                      group.displayDistance,
+                      style: TextStyle(fontSize: 10, color: c.iconMuted),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Text(
                   group.name,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2C3E30)),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: c.primaryText,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '${group.memberCount} members',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(fontSize: 12, color: c.secondaryText),
                 ),
               ],
             ),
@@ -551,8 +583,8 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1B5A27),
-              foregroundColor: Colors.white,
+              backgroundColor: c.filledButtonBg,
+              foregroundColor: c.filledButtonFg,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             child: const Text('Join'),
@@ -562,36 +594,41 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildCommunityHighlightCard() {
+  Widget _buildCommunityHighlightCard(ColonyColors c) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1B5A27), Color(0xFF2E6B3B)],
+        gradient: LinearGradient(
+          colors: [c.communityBannerTop, c.communityBannerBottom],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
+        border: c.isDark ? Border.all(color: c.divider) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Welcome to Colony!',
-              style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white)),
+          const Text(
+            'Welcome to Colony!',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
           const SizedBox(height: 8),
           Text(
-              'Connect with ${_nearbyUsers.length} neighbors and ${_nearbyGroups.length} groups nearby.',
-              style: const TextStyle(fontSize: 14, color: Colors.white70)),
+            'Connect with ${_nearbyUsers.length} neighbors and ${_nearbyGroups.length} groups nearby.',
+            style: TextStyle(fontSize: 14, color: c.communityBodyText),
+          ),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _refreshAll,
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF1B5A27),
+              foregroundColor: c.communityCtaFg,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             ),
             child: const Text('Explore Community'),
@@ -650,7 +687,11 @@ class _PeopleCardState extends State<_PeopleCard> {
       setState(() => _isWaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Wave sent!' : 'Failed to send wave'),
+          content: Text(
+            success
+                ? 'Wave sent!'
+                : 'Could not send wave — stay within 5 km with location enabled.',
+          ),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
@@ -681,6 +722,7 @@ class _PeopleCardState extends State<_PeopleCard> {
 
   @override
   Widget build(BuildContext context) {
+    final c = ColonyColors.of(context);
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -694,8 +736,9 @@ class _PeopleCardState extends State<_PeopleCard> {
         width: 160,
         padding: const EdgeInsets.all(15),
         decoration: BoxDecoration(
-          color: const Color(0xFFE8F2E4),
+          color: c.rowCard,
           borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: c.divider.withOpacity(c.isDark ? 0.4 : 0.2)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -706,7 +749,7 @@ class _PeopleCardState extends State<_PeopleCard> {
               children: [
                 CircleAvatar(
                   radius: 24,
-                  backgroundColor: Colors.black,
+                  backgroundColor: c.isDark ? c.pillBackground : Colors.black,
                   backgroundImage: widget.user.avatarUrl != null
                       ? NetworkImage(widget.user.avatarUrl!)
                       : const NetworkImage('https://i.pravatar.cc/150'),
@@ -714,16 +757,22 @@ class _PeopleCardState extends State<_PeopleCard> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: c.pillBackground,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.location_on, size: 10, color: Color(0xFF14471E)),
+                      Icon(Icons.location_on, size: 10, color: c.primaryText),
                       const SizedBox(width: 2),
-                      Text(widget.user.displayDistance,
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF14471E))),
+                      Text(
+                        widget.user.displayDistance,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: c.primaryText,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -732,12 +781,16 @@ class _PeopleCardState extends State<_PeopleCard> {
             const SizedBox(height: 12),
             Text(
               widget.user.displayName ?? widget.user.username ?? 'User',
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF2C3E30)),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: c.primaryText,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               widget.user.bio ?? 'Colony Member',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: TextStyle(fontSize: 12, color: c.secondaryText),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -745,19 +798,19 @@ class _PeopleCardState extends State<_PeopleCard> {
             SizedBox(
               width: double.infinity,
               child: _isLoading
-                  ? const Center(
+                  ? Center(
                       child: SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1B5A27)),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: c.accent),
                       ),
                     )
                   : _canChat
                       ? ElevatedButton(
                           onPressed: _openChat,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1B5A27),
-                            foregroundColor: Colors.white,
+                            backgroundColor: c.filledButtonBg,
+                            foregroundColor: c.filledButtonFg,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                             padding: const EdgeInsets.symmetric(vertical: 8),
                           ),
