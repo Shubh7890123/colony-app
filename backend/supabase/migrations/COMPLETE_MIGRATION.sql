@@ -301,7 +301,45 @@ CREATE INDEX IF NOT EXISTS messages_conversation_idx ON public.messages(conversa
 
 
 -- ============================================================
--- STEP 9: GROUP CHAT MESSAGES TABLE
+-- STEP 9: USER KEYS TABLE (for E2E encryption)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.user_keys (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL UNIQUE,
+    public_key TEXT NOT NULL,
+    key_version INTEGER DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+);
+
+ALTER TABLE public.user_keys ENABLE ROW LEVEL SECURITY;
+
+-- Users can view their own keys
+CREATE POLICY "Users can view their own keys" ON public.user_keys
+    FOR SELECT USING (auth.uid() = user_id);
+
+-- Users can view other users' public keys (needed for E2E encryption)
+CREATE POLICY "Users can view public keys for encryption" ON public.user_keys
+    FOR SELECT TO authenticated USING (true);
+
+-- Users can insert their own keys
+CREATE POLICY "Users can insert their own keys" ON public.user_keys
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Users can update their own keys
+CREATE POLICY "Users can update their own keys" ON public.user_keys
+    FOR UPDATE USING (auth.uid() = user_id);
+
+-- Grant permissions
+GRANT SELECT, INSERT, UPDATE ON public.user_keys TO authenticated;
+
+-- Index for quick lookup
+CREATE INDEX IF NOT EXISTS user_keys_user_id_idx ON public.user_keys(user_id);
+
+
+-- ============================================================
+-- STEP 10: GROUP CHAT MESSAGES TABLE
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS public.group_messages (
@@ -336,7 +374,7 @@ CREATE POLICY "Group members can send messages" ON public.group_messages
 
 
 -- ============================================================
--- STEP 10: FUNCTIONS FOR LOCATION-BASED QUERIES
+-- STEP 11: FUNCTIONS FOR LOCATION-BASED QUERIES
 -- ============================================================
 
 -- Function to calculate distance between two points (in km) using Haversine formula
@@ -434,7 +472,7 @@ GRANT EXECUTE ON FUNCTION public.get_nearby_groups(double precision, double prec
 
 
 -- ============================================================
--- STEP 11: FUNCTION TO CHECK IF CHAT IS ENABLED
+-- STEP 12: FUNCTION TO CHECK IF CHAT IS ENABLED
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION can_chat_with(target_user_id uuid)
@@ -456,7 +494,7 @@ GRANT EXECUTE ON FUNCTION public.can_chat_with(uuid) TO authenticated;
 
 
 -- ============================================================
--- STEP 12: TRIGGER TO UPDATE LAST_MESSAGE_AT
+-- STEP 13: TRIGGER TO UPDATE LAST_MESSAGE_AT
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION update_conversation_timestamp()
@@ -487,6 +525,9 @@ CREATE TRIGGER on_message_inserted
 -- 6. waves - Mutual wave system for chat enable
 -- 7. conversations - Chat conversations
 -- 8. messages - Chat messages
--- 9. group_messages - Group chat messages
--- 10. Functions for location-based queries
+-- 9. user_keys - Public keys for E2E encryption
+-- 10. group_messages - Group chat messages
+-- 11. Functions for location-based queries
+-- 12. Function to check if chat is enabled
+-- 13. Trigger to update conversation timestamp
 -- ============================================================

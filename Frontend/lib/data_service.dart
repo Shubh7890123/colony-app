@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_service.dart';
+import 'notification_service.dart';
 
 class DataService {
   static final DataService _instance = DataService._internal();
@@ -167,10 +168,27 @@ class DataService {
       final user = _client.auth.currentUser;
       if (user == null) return false;
 
+      // Check if wave already exists
+      final existingWave = await _client
+          .from('waves')
+          .select('id')
+          .eq('sender_id', user.id)
+          .eq('receiver_id', receiverId)
+          .maybeSingle();
+
+      if (existingWave != null) {
+        // Wave already exists, return true (idempotent)
+        return true;
+      }
+
       await _client.from('waves').insert({
         'sender_id': user.id,
         'receiver_id': receiverId,
       });
+  
+      // Send push notification to receiver
+      await NotificationService().sendWaveNotification(receiverId);
+  
       return true;
     } catch (e) {
       print('Error sending wave: $e');
@@ -234,6 +252,50 @@ class DataService {
     } catch (e) {
       print('Error checking chat permission: $e');
       return false;
+    }
+  }
+
+  /// Get wave status between current user and target user
+  /// Returns: 'pending' (sent, waiting), 'accepted' (they accepted), 'rejected' (they rejected),
+  /// 'received' (they sent you a wave), or null (no wave)
+  Future<String?> getWaveStatus(String targetUserId) async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return null;
+
+      // Check if current user sent a wave to target
+      final sentWave = await _client
+          .from('waves')
+          .select('status')
+          .eq('sender_id', user.id)
+          .eq('receiver_id', targetUserId)
+          .maybeSingle();
+
+      if (sentWave != null) {
+        return sentWave['status'] as String?;
+      }
+
+      // Check if target sent a wave to current user
+      final receivedWave = await _client
+          .from('waves')
+          .select('status')
+          .eq('sender_id', targetUserId)
+          .eq('receiver_id', user.id)
+          .maybeSingle();
+
+      if (receivedWave != null) {
+        // If they sent us a wave, return 'received_' + status
+        final status = receivedWave['status'] as String?;
+        if (status == 'pending') {
+          return 'received'; // They sent us a pending wave
+        }
+        return 'received_$status'; // received_accepted or received_rejected
+      }
+
+      return null;
+    } catch (e) {
+      print('Error getting wave status: $e');
+      return null;
     }
   }
 
@@ -347,7 +409,9 @@ class DataService {
             media_type,
             is_read,
             created_at,
-            sender_id
+            sender_id,
+            delivered_at,
+            seen_at
           ''')
           .eq('conversation_id', conversationId)
           .order('created_at', ascending: true);
@@ -366,6 +430,7 @@ class DataService {
     required String content,
     String? mediaUrl,
     String? mediaType,
+    String? targetUserId, // For sending notification
   }) async {
     try {
       final user = _client.auth.currentUser;
@@ -383,7 +448,20 @@ class DataService {
           .select()
           .single();
 
-      return Message.fromJson(response);
+      final message = Message.fromJson(response);
+
+      // Send push notification to target user
+      if (targetUserId != null && content.isNotEmpty) {
+        // Truncate message for notification preview
+        final preview = content.length > 50 ? '${content.substring(0, 50)}...' : content;
+        await NotificationService().sendMessageNotification(
+          targetUserId: targetUserId,
+          conversationId: conversationId,
+          messagePreview: preview,
+        );
+      }
+
+      return message;
     } catch (e) {
       print('Error sending message: $e');
       return null;
@@ -550,6 +628,124 @@ class DataService {
     } catch (e) {
       print('Error updating profile: $e');
       return false;
+    }
+  }
+
+  // ============================================
+  // USER KEYS (for E2E encryption)
+  // ============================================
+
+  Future<String?> getUserPublicKey(String userId) async {
+    try {
+      final response = await _client
+          .from('user_keys')
+          .select('public_key')
+          .eq('user_id', userId)
+          .single();
+
+      return response['public_key'] as String?;
+    } catch (e) {
+      print('Error fetching user public key: $e');
+      return null;
+    }
+  }
+
+  Future<bool> saveUserPublicKey(String publicKey, {int keyVersion = 1}) async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return false;
+
+      await _client
+          .from('user_keys')
+          .upsert({
+            'user_id': user.id,
+            'public_key': publicKey,
+            'key_version': keyVersion,
+          }, onConflict: 'user_id');
+
+      return true;
+    } catch (e) {
+      print('Error saving user public key: $e');
+      return false;
+    }
+  }
+
+  // ============================================
+  // ONLINE STATUS & LAST SEEN
+  // ============================================
+
+  /// Update current user's last_seen timestamp
+  Future<void> updateLastSeen() async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return;
+
+      await _client.from('profiles').update({
+        'last_seen': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', user.id);
+    } catch (e) {
+      print('Error updating last seen: $e');
+    }
+  }
+
+  /// Get user's online status and last seen
+  Future<UserProfile?> getUserOnlineStatus(String userId) async {
+    try {
+      final response = await _client
+          .from('profiles')
+          .select('id, last_seen')
+          .eq('id', userId)
+          .single();
+
+      return UserProfile.fromJson(response);
+    } catch (e) {
+      print('Error fetching user online status: $e');
+      return null;
+    }
+  }
+
+  // ============================================
+  // MESSAGE DELIVERY STATUS
+  // ============================================
+
+  /// Mark messages as delivered for current user
+  Future<void> markMessagesAsDelivered(String conversationId) async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return;
+
+      // Mark all undelivered messages sent to current user as delivered
+      await _client
+          .from('messages')
+          .update({
+            'delivered_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('conversation_id', conversationId)
+          .neq('sender_id', user.id)
+          .filter('delivered_at', 'is', null);
+    } catch (e) {
+      print('Error marking messages as delivered: $e');
+    }
+  }
+
+  /// Mark messages as seen for current user
+  Future<void> markMessagesAsSeen(String conversationId) async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return;
+
+      // Mark all unseen messages sent to current user as seen
+      await _client
+          .from('messages')
+          .update({
+            'seen_at': DateTime.now().toUtc().toIso8601String(),
+            'is_read': true,
+          })
+          .eq('conversation_id', conversationId)
+          .neq('sender_id', user.id)
+          .filter('seen_at', 'is', null);
+    } catch (e) {
+      print('Error marking messages as seen: $e');
     }
   }
 }
@@ -869,6 +1065,8 @@ class Message {
   final bool isRead;
   final DateTime createdAt;
   final String senderId;
+  final DateTime? deliveredAt;
+  final DateTime? seenAt;
 
   Message({
     required this.id,
@@ -878,7 +1076,16 @@ class Message {
     required this.isRead,
     required this.createdAt,
     required this.senderId,
+    this.deliveredAt,
+    this.seenAt,
   });
+
+  // Message status enum
+  MessageStatus get status {
+    if (seenAt != null) return MessageStatus.seen;
+    if (deliveredAt != null) return MessageStatus.delivered;
+    return MessageStatus.sent;
+  }
 
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(
@@ -889,8 +1096,20 @@ class Message {
       isRead: json['is_read'] ?? false,
       createdAt: DateTime.parse(json['created_at']),
       senderId: json['sender_id'],
+      deliveredAt: json['delivered_at'] != null
+          ? DateTime.parse(json['delivered_at'])
+          : null,
+      seenAt: json['seen_at'] != null
+          ? DateTime.parse(json['seen_at'])
+          : null,
     );
   }
+}
+
+enum MessageStatus {
+  sent,      // Single tick - message sent but not delivered
+  delivered, // Double tick grey - message delivered
+  seen,      // Double tick blue - message seen
 }
 
 class GroupMember {
@@ -950,6 +1169,7 @@ class UserProfile {
   final String? locationText;
   final double? latitude;
   final double? longitude;
+  final DateTime? lastSeen;
 
   UserProfile({
     required this.id,
@@ -962,7 +1182,14 @@ class UserProfile {
     this.locationText,
     this.latitude,
     this.longitude,
+    this.lastSeen,
   });
+
+  // Check if user is online (active within last 5 minutes)
+  bool get isOnline {
+    if (lastSeen == null) return false;
+    return DateTime.now().difference(lastSeen!).inMinutes < 5;
+  }
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
@@ -976,6 +1203,9 @@ class UserProfile {
       locationText: json['location_text'],
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
+      lastSeen: json['last_seen'] != null
+          ? DateTime.parse(json['last_seen'])
+          : null,
     );
   }
 }

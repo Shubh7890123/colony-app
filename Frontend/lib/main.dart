@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'supabase_service.dart';
 import 'screens/device_auth_gate.dart';
+import 'notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  // Initialize Firebase FIRST (required before any Firebase operations)
+  await Firebase.initializeApp();
+  print('Firebase initialized successfully');
+
   // Initialize Supabase
   await SupabaseService().initialize();
-  
+
+  // Initialize Notification Service
+  await NotificationService().initialize();
+
   runApp(const MyApp());
 }
 

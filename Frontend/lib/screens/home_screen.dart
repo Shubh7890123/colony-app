@@ -4,6 +4,7 @@ import '../location_service.dart';
 import '../data_service.dart';
 import '../supabase_service.dart';
 import 'user_profile_screen.dart';
+import 'chat_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -431,93 +432,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildPeopleCard(NearbyUser user) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => UserProfileScreen(userId: user.id),
-          ),
-        );
-      },
-      child: Container(
-        width: 160,
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE8F2E4),
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: Colors.black,
-                  backgroundImage: user.avatarUrl != null
-                      ? NetworkImage(user.avatarUrl!)
-                      : const NetworkImage('https://i.pravatar.cc/150'),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.location_on, size: 10, color: Color(0xFF14471E)),
-                      const SizedBox(width: 2),
-                      Text(user.displayDistance,
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF14471E))),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              user.displayName ?? user.username ?? 'User',
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF2C3E30)),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              user.bio ?? 'Colony Member',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () async {
-                  final success = await _dataService.sendWave(user.id);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(success ? 'Wave sent!' : 'Failed to send wave'),
-                        backgroundColor: success ? Colors.green : Colors.red,
-                      ),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1B5A27),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                ),
-                child: const Text('Wave', style: TextStyle(fontSize: 12)),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return _PeopleCard(
+      user: user,
+      dataService: _dataService,
     );
   }
 
@@ -680,6 +597,195 @@ class _HomeScreenState extends State<HomeScreen> {
             child: const Text('Explore Community'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// People card widget with wave status and message button
+class _PeopleCard extends StatefulWidget {
+  final NearbyUser user;
+  final DataService dataService;
+
+  const _PeopleCard({
+    required this.user,
+    required this.dataService,
+  });
+
+  @override
+  State<_PeopleCard> createState() => _PeopleCardState();
+}
+
+class _PeopleCardState extends State<_PeopleCard> {
+  String? _waveStatus;
+  bool _canChat = false;
+  bool _isLoading = true;
+  bool _isWaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStatus();
+  }
+
+  Future<void> _loadStatus() async {
+    final waveStatus = await widget.dataService.getWaveStatus(widget.user.id);
+    final canChat = await widget.dataService.canChatWith(widget.user.id);
+    if (mounted) {
+      setState(() {
+        _waveStatus = waveStatus;
+        _canChat = canChat;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _sendWave() async {
+    setState(() => _isWaving = true);
+    final success = await widget.dataService.sendWave(widget.user.id);
+    if (mounted) {
+      if (success) {
+        await _loadStatus();
+      }
+      setState(() => _isWaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? 'Wave sent!' : 'Failed to send wave'),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openChat() async {
+    final conv = await widget.dataService.getOrCreateConversation(widget.user.id);
+    if (!mounted) return;
+    if (conv == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open chat right now')),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatDetailScreen(
+          conversationId: conv.id,
+          otherUserId: widget.user.id,
+          otherUserName: widget.user.displayName ?? widget.user.username ?? 'User',
+          otherUserAvatar: widget.user.avatarUrl,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => UserProfileScreen(userId: widget.user.id),
+          ),
+        ).then((_) => _loadStatus()); // Refresh status when returning
+      },
+      child: Container(
+        width: 160,
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE8F2E4),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: Colors.black,
+                  backgroundImage: widget.user.avatarUrl != null
+                      ? NetworkImage(widget.user.avatarUrl!)
+                      : const NetworkImage('https://i.pravatar.cc/150'),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.location_on, size: 10, color: Color(0xFF14471E)),
+                      const SizedBox(width: 2),
+                      Text(widget.user.displayDistance,
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF14471E))),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              widget.user.displayName ?? widget.user.username ?? 'User',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF2C3E30)),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              widget.user.bio ?? 'Colony Member',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: _isLoading
+                  ? const Center(
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1B5A27)),
+                      ),
+                    )
+                  : _canChat
+                      ? ElevatedButton(
+                          onPressed: _openChat,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1B5A27),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                          ),
+                          child: const Text('Message', style: TextStyle(fontSize: 12)),
+                        )
+                      : ElevatedButton(
+                          onPressed: _isWaving || _waveStatus == 'pending' ? null : _sendWave,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFF17F36),
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.grey,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                          ),
+                          child: _isWaving
+                              ? const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : Text(
+                                  _waveStatus == 'pending' ? 'Wave Sent' : 'Wave',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                        ),
+            ),
+          ],
+        ),
       ),
     );
   }

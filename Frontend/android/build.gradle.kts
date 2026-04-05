@@ -5,7 +5,7 @@ allprojects {
     }
 }
 
-val newBuildDir: Directory =
+val newBuildDir: Directory = 
     rootProject.layout.buildDirectory
         .dir("../../build")
         .get()
@@ -15,10 +15,16 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
 
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
+}
+
+// Google Services plugin for Firebase
+plugins {
+    id("com.google.gms.google-services") version "4.4.0" apply false
 }

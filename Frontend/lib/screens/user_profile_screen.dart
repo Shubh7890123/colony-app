@@ -34,11 +34,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     
     final profile = await _dataService.getUserProfile(widget.userId);
     final canChat = await _dataService.canChatWith(widget.userId);
+    final waveStatus = await _dataService.getWaveStatus(widget.userId);
     
     if (!mounted) return;
     setState(() {
       _userProfile = profile;
       _canChat = canChat;
+      _waveStatus = waveStatus;
+      // If wave status is pending or accepted, mark as waved
+      _hasWaved = waveStatus == 'pending' || waveStatus == 'accepted';
       _isLoading = false;
     });
   }
@@ -48,13 +52,19 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     
     final success = await _dataService.sendWave(widget.userId);
     
-    setState(() {
-      _isWaving = false;
-      if (success) {
-        _hasWaved = true;
-        _waveStatus = 'pending';
-      }
-    });
+    if (!mounted) return;
+    
+    if (success) {
+      // Refresh the wave status from database
+      final waveStatus = await _dataService.getWaveStatus(widget.userId);
+      setState(() {
+        _isWaving = false;
+        _waveStatus = waveStatus;
+        _hasWaved = waveStatus == 'pending' || waveStatus == 'accepted';
+      });
+    } else {
+      setState(() => _isWaving = false);
+    }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

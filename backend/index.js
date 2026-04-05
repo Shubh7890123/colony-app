@@ -798,6 +798,490 @@ app.post('/groups/:groupId/leave', async (req, res) => {
   }
 });
 
+// ============================================================
+// CONVERSATIONS ENDPOINTS
+// ============================================================
+
+// Get all conversations for the authenticated user
+app.get('/conversations', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization header required'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided'
+      });
+    }
+
+    // Get user ID from token
+    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+
+    if (userError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    const userId = userData.user.id;
+
+    // Get all conversations where user is participant
+    const { data: conversations, error: convError } = await supabaseAdmin
+      .from('conversations')
+      .select(`
+        id,
+        created_at,
+        last_message_at,
+        user1_id,
+        user2_id
+      `)
+      .or(`user1_id.eq.${userId},user2_id.eq.${userId}`)
+      .order('last_message_at', { ascending: false, nullsFirst: false });
+
+    if (convError) {
+      return res.status(400).json({
+        success: false,
+        message: convError.message
+      });
+    }
+
+    // Get other user details for each conversation
+    const conversationsWithUsers = await Promise.all(
+      (conversations || []).map(async (conv) => {
+        const otherUserId = conv.user1_id === userId ? conv.user2_id : conv.user1_id;
+        
+        // Get other user's profile
+        const { data: otherUser } = await supabaseAdmin
+          .from('profiles')
+          .select('id, username, display_name, avatar_url')
+          .eq('id', otherUserId)
+          .single();
+
+        // Get last message
+        const { data: lastMessage } = await supabaseAdmin
+          .from('messages')
+          .select('content, created_at, sender_id')
+          .eq('conversation_id', conv.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        return {
+          id: conv.id,
+          otherUser: otherUser ? {
+            id: otherUser.id,
+            username: otherUser.username,
+            displayName: otherUser.display_name,
+            avatarUrl: otherUser.avatar_url
+          } : null,
+          lastMessage: lastMessage ? {
+            content: lastMessage.content,
+            createdAt: lastMessage.created_at,
+            senderId: lastMessage.sender_id
+          } : null,
+          createdAt: conv.created_at,
+          lastMessageAt: conv.last_message_at
+        };
+      })
+    );
+
+    res.status(200).json({
+      success: true,
+      data: conversationsWithUsers
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred',
+      error: error.message
+    });
+  }
+});
+
+// Get or create conversation with another user
+app.post('/conversations', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization header required'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { otherUserId } = req.body;
+
+    if (!otherUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'otherUserId is required'
+      });
+    }
+
+    // Get user ID from token
+    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+
+    if (userError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    const userId = userData.user.id;
+
+    if (userId === otherUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot create conversation with yourself'
+      });
+    }
+
+    // Check if conversation already exists
+    const { data: existingConv, error: existingError } = await supabaseAdmin
+      .from('conversations')
+      .select('*')
+      .or(`and(user1_id.eq.${userId},user2_id.eq.${otherUserId}),and(user1_id.eq.${otherUserId},user2_id.eq.${userId})`)
+      .single();
+
+    if (existingConv) {
+      return res.status(200).json({
+        success: true,
+        data: existingConv,
+        isNew: false
+      });
+    }
+
+    // Create new conversation
+    const { data: newConv, error: createError } = await supabaseAdmin
+      .from('conversations')
+      .insert({
+        user1_id: userId,
+        user2_id: otherUserId
+      })
+      .select()
+      .single();
+
+    if (createError) {
+      return res.status(400).json({
+        success: false,
+        message: createError.message
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      data: newConv,
+      isNew: true
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred',
+      error: error.message
+    });
+  }
+});
+
+// Get messages for a conversation
+app.get('/conversations/:id/messages', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const { id } = req.params;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization header required'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided'
+      });
+    }
+
+    // Get user ID from token
+    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+
+    if (userError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    const userId = userData.user.id;
+
+    // Verify user is part of this conversation
+    const { data: conversation, error: convError } = await supabaseAdmin
+      .from('conversations')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (convError || !conversation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Conversation not found'
+      });
+    }
+
+    if (conversation.user1_id !== userId && conversation.user2_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    // Get messages
+    const { data: messages, error: msgError } = await supabaseAdmin
+      .from('messages')
+      .select('id, content, sender_id, is_read, created_at, media_url, media_type')
+      .eq('conversation_id', id)
+      .order('created_at', { ascending: true });
+
+    if (msgError) {
+      return res.status(400).json({
+        success: false,
+        message: msgError.message
+      });
+    }
+
+    // Mark messages as read
+    await supabaseAdmin
+      .from('messages')
+      .update({ is_read: true })
+      .eq('conversation_id', id)
+      .neq('sender_id', userId)
+      .eq('is_read', false);
+
+    res.status(200).json({
+      success: true,
+      data: messages || []
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred',
+      error: error.message
+    });
+  }
+});
+
+// Send a message
+app.post('/conversations/:id/messages', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const { id } = req.params;
+    const { content, mediaUrl, mediaType } = req.body;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization header required'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided'
+      });
+    }
+
+    if (!content && !mediaUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Content or media is required'
+      });
+    }
+
+    // Get user ID from token
+    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+
+    if (userError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    const userId = userData.user.id;
+
+    // Verify user is part of this conversation
+    const { data: conversation, error: convError } = await supabaseAdmin
+      .from('conversations')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (convError || !conversation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Conversation not found'
+      });
+    }
+
+    if (conversation.user1_id !== userId && conversation.user2_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    // Insert message
+    const { data: message, error: msgError } = await supabaseAdmin
+      .from('messages')
+      .insert({
+        conversation_id: id,
+        sender_id: userId,
+        content: content || '',
+        media_url: mediaUrl,
+        media_type: mediaType
+      })
+      .select()
+      .single();
+
+    if (msgError) {
+      return res.status(400).json({
+        success: false,
+        message: msgError.message
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      data: message
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================
+// USER KEYS ENDPOINTS (for E2E encryption)
+// ============================================================
+
+// Get user's public key
+app.get('/user-keys/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const { data: userKey, error } = await supabaseAdmin
+      .from('user_keys')
+      .select('public_key, key_version, created_at')
+      .eq('user_id', userId)
+      .single();
+
+    if (error) {
+      return res.status(404).json({
+        success: false,
+        message: 'Public key not found for this user'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: userKey
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred',
+      error: error.message
+    });
+  }
+});
+
+// Save user's public key
+app.post('/user-keys', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization header required'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const { publicKey, keyVersion } = req.body;
+
+    if (!publicKey) {
+      return res.status(400).json({
+        success: false,
+        message: 'publicKey is required'
+      });
+    }
+
+    // Get user ID from token
+    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+
+    if (userError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    const userId = userData.user.id;
+
+    // Upsert the public key
+    const { data: userKey, error: keyError } = await supabaseAdmin
+      .from('user_keys')
+      .upsert({
+        user_id: userId,
+        public_key: publicKey,
+        key_version: keyVersion || 1,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' })
+      .select()
+      .single();
+
+    if (keyError) {
+      return res.status(400).json({
+        success: false,
+        message: keyError.message
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      data: userKey
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred',
+      error: error.message
+    });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

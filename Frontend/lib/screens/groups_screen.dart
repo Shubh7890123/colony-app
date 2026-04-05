@@ -431,14 +431,9 @@ class _GroupsScreenState extends State<GroupsScreen> with SingleTickerProviderSt
               ],
             ),
           ),
-          const Text(
-            'Colony',
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 18,
-              color: Color(0xFF14471E),
-              fontStyle: FontStyle.italic,
-            ),
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Color(0xFF14471E)),
+            onPressed: _loadData,
           ),
           StreamBuilder<AuthState>(
             stream: SupabaseService().client.auth.onAuthStateChange,

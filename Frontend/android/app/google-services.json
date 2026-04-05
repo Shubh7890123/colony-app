@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "193255135719",
+    "project_id": "colonyapp-40677",
+    "storage_bucket": "colonyapp-40677.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:193255135719:android:fdbc4ad2606cc2f2338542",
+        "android_client_info": {
+          "package_name": "com.example.colony_login"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "193255135719-gas7c6c19kba942a6jinnerlk51o2lnu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAEkRyn0OPhkWG0FbsxNQZFSGZz65fUy0o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "193255135719-gas7c6c19kba942a6jinnerlk51o2lnu.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

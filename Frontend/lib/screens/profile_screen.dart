@@ -102,14 +102,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         ),
-        const Text(
-          'Colony',
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-            fontSize: 18,
-            color: Color(0xFF14471E),
-            fontStyle: FontStyle.italic,
-          ),
+        IconButton(
+          icon: const Icon(Icons.refresh, color: Color(0xFF2C3E30)),
+          onPressed: _loadProfileData,
         ),
         IconButton(
           icon: const Icon(Icons.settings, color: Color(0xFF2C3E30)),
