@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../colony_theme.dart';
 import '../location_service.dart';
 import '../data_service.dart';
+import '../storage_service.dart';
 import 'user_profile_screen.dart';
 import 'chat_detail_screen.dart';
+import 'notifications_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,22 +19,83 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final DataService _dataService = DataService();
   final LocationService _locationService = LocationService();
-  
+
   UserLocation? _userLocation;
   List<NearbyUser> _nearbyUsers = [];
   List<NearbyGroup> _nearbyGroups = [];
   List<Story> _stories = [];
-  
+
   bool _isLoadingLocation = true;
   bool _isLoadingUsers = false;
   bool _isLoadingGroups = false;
   bool _isLoadingStories = false;
   String? _errorMessage;
+  String _searchQuery = '';
+
+  // Parsed location parts for better display
+  String _locationAreaName = '';
+  String _locationCityLine = '';
+
+  // Notification state
+  int _notificationCount = 0;
+  late final SupabaseClient _supabase;
+  RealtimeChannel? _notificationChannel;
 
   @override
   void initState() {
     super.initState();
+    _supabase = Supabase.instance.client;
     _initializeData();
+    _fetchNotificationCount();
+    _subscribeToNotifications();
+  }
+
+  @override
+  void dispose() {
+    _notificationChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  Future<void> _fetchNotificationCount() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final response = await _supabase
+          .from('waves')
+          .select('id')
+          .eq('receiver_id', userId)
+          .eq('status', 'pending');
+
+      if (mounted) {
+        setState(() {
+          _notificationCount = response.length;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching notification count: $e');
+    }
+  }
+
+  void _subscribeToNotifications() {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    _notificationChannel = _supabase.channel('home_notifications_$userId');
+    _notificationChannel!.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'waves',
+      callback: (payload) => _fetchNotificationCount(),
+    ).subscribe();
+  }
+
+  void _navigateToNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+    );
+    _fetchNotificationCount();
   }
 
   Future<void> _initializeData() async {
@@ -41,6 +106,30 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchStories();
   }
 
+  void _parseLocationParts(String locationText) {
+    // locationText is usually "SUBLOCALITY, LOCALITY, DISTRICT" in uppercase
+    final parts = locationText.split(', ');
+    if (parts.length >= 2) {
+      // Capitalize each word properly
+      _locationAreaName = _toTitleCase(parts[0]);
+      _locationCityLine = parts.sublist(1).map(_toTitleCase).join(', ');
+    } else if (parts.length == 1) {
+      _locationAreaName = _toTitleCase(parts[0]);
+      _locationCityLine = '';
+    } else {
+      _locationAreaName = _toTitleCase(locationText);
+      _locationCityLine = '';
+    }
+  }
+
+  String _toTitleCase(String text) {
+    if (text.isEmpty) return text;
+    return text.split(' ').map((word) {
+      if (word.isEmpty) return word;
+      return '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}';
+    }).join(' ');
+  }
+
   Future<void> _fetchLocation() async {
     setState(() {
       _isLoadingLocation = true;
@@ -48,26 +137,27 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      // Prefer live GPS so nearby lists match your current position (5 km discovery).
       final result = await _locationService.fetchAndUpdateLocation();
-      if (result.success &&
-          result.latitude != null &&
-          result.longitude != null) {
+      if (result.success && result.latitude != null && result.longitude != null) {
         setState(() {
           _userLocation = UserLocation(
             latitude: result.latitude!,
             longitude: result.longitude!,
             locationText: result.locationText ?? 'Unknown',
           );
+          _parseLocationParts(result.locationText ?? 'Unknown');
         });
       } else {
         final cached = await _locationService.getUserLocation();
         setState(() {
           _userLocation = cached;
+          if (cached != null) {
+            _parseLocationParts(cached.locationText);
+          }
           _errorMessage = result.errorMessage ??
               (cached == null
                   ? 'Turn on location permission to see people and groups within 5 km.'
-                  : 'Using last saved location. Open location settings for best results.');
+                  : null);
         });
       }
     } catch (e) {
@@ -83,7 +173,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchNearbyData() async {
     if (_userLocation == null) return;
-
     setState(() {
       _isLoadingUsers = true;
       _isLoadingGroups = true;
@@ -113,7 +202,6 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isLoadingStories = true;
     });
-
     final stories = await _dataService.getActiveStories();
     setState(() {
       _stories = stories;
@@ -131,70 +219,99 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
-        child: RefreshIndicator(
-          color: c.accent,
-          onRefresh: _refreshAll,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildHeader(c),
-                if (_errorMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12, bottom: 12),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.red.withOpacity(0.25)),
-                      ),
-                      child: Text(
-                        _errorMessage!,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.red,
-                        ),
-                      ),
+        child: NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) => [
+            SliverAppBar(
+              pinned: true,
+              floating: false,
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              surfaceTintColor: Colors.transparent,
+              elevation: innerBoxIsScrolled ? 2 : 0,
+              toolbarHeight: 50,
+              title: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Colony',
+                    style: TextStyle(
+                      color: c.accent,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: -0.5,
                     ),
                   ),
-                const SizedBox(height: 20),
-                _buildSearchBar(c),
-                const SizedBox(height: 30),
-                _buildSectionHeader(c, 'Colony Stories', 'VIEW ALL'),
-                const SizedBox(height: 15),
-                _buildStoriesList(c),
-                const SizedBox(height: 30),
-                Text(
-                  'Nearby people',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: c.primaryText,
+                  _buildNotificationIcon(c),
+                ],
+              ),
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(52),
+                child: _buildLocationBar(c),
+              ),
+            ),
+          ],
+          body: RefreshIndicator(
+            color: c.accent,
+            onRefresh: _refreshAll,
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_errorMessage != null)
+                          Container(
+                            margin: const EdgeInsets.only(top: 12, bottom: 12),
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                  color: Colors.orange.withOpacity(0.35)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.location_off,
+                                    color: Colors.orange, size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _errorMessage!,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.orange,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          const SizedBox(height: 16),
+                        _buildSearchBar(c),
+                        const SizedBox(height: 28),
+                        _buildSectionHeader(c, 'Colony Stories', 'VIEW ALL'),
+                        const SizedBox(height: 14),
+                        _buildStoriesList(c),
+                        const SizedBox(height: 28),
+                        _buildSectionHeader(c, 'Nearby People', null),
+                        const SizedBox(height: 14),
+                        _buildNearbyPeoplesList(c),
+                        const SizedBox(height: 28),
+                        _buildSectionHeader(c, 'Nearby Groups', 'JOIN NEW'),
+                        const SizedBox(height: 14),
+                        _buildNearbyGroupsList(c),
+                        const SizedBox(height: 28),
+                        _buildCommunityHighlightCard(c),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 15),
-                _buildNearbyPeoplesList(c),
-                const SizedBox(height: 30),
-                _buildSectionHeader(c, 'Nearby Groups', 'JOIN NEW'),
-                const SizedBox(height: 15),
-                _buildNearbyGroupsList(c),
-                const SizedBox(height: 30),
-                Text(
-                  'Community Highlights',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: c.primaryText,
-                  ),
-                ),
-                const SizedBox(height: 15),
-                _buildCommunityHighlightCard(c),
-                const SizedBox(height: 20),
               ],
             ),
           ),
@@ -203,65 +320,119 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHeader(ColonyColors c) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildNotificationIcon(ColonyColors c) {
+    return Stack(
       children: [
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: c.headerBadgeBg,
+        IconButton(
+          icon: Icon(
+            Icons.notifications_outlined,
+            color: c.accent,
+            size: 28,
+          ),
+          onPressed: _navigateToNotifications,
+        ),
+        if (_notificationCount > 0)
+          Positioned(
+            right: 8,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(
+                color: Colors.red,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.location_on, color: c.primaryText, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Colony',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                    color: c.primaryText,
-                  ),
+              constraints: const BoxConstraints(
+                minWidth: 18,
+                minHeight: 18,
+              ),
+              child: Text(
+                _notificationCount > 99 ? '99+' : '$_notificationCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
                 ),
-                if (_isLoadingLocation)
-                  const Text('Fetching location...',
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey))
-                else if (_userLocation != null)
-                  Text(_userLocation!.locationText,
-                      style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey))
-                else
-                  GestureDetector(
-                    onTap: _fetchLocation,
-                    child: const Row(
-                      children: [
-                        Icon(Icons.refresh, size: 12, color: Colors.orange),
-                        SizedBox(width: 4),
-                        Text('Tap to fetch location',
-                            style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.orange)),
-                      ],
-                    ),
-                  ),
-              ],
+                textAlign: TextAlign.center,
+              ),
             ),
-          ],
-        ),
-        Icon(Icons.notifications, color: c.primaryText),
+          ),
       ],
+    );
+  }
+
+  Widget _buildLocationBar(ColonyColors c) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: _isLoadingLocation
+                ? Row(
+                    children: [
+                      Icon(Icons.location_on_rounded, color: c.accent, size: 24),
+                      const SizedBox(width: 8),
+                      Container(
+                        height: 16,
+                        width: 100,
+                        decoration: BoxDecoration(
+                          color: c.divider.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.location_on_rounded, color: Colors.pinkAccent, size: 24),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _locationAreaName.isEmpty
+                                  ? (_userLocation?.locationText ?? 'Unknown Location')
+                                  : _locationAreaName,
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: c.primaryText,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.keyboard_arrow_down_rounded, color: c.primaryText, size: 22),
+                        ],
+                      ),
+                      if (_locationCityLine.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 30),
+                          child: Text(
+                            _locationCityLine,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: c.primaryText.withOpacity(0.8),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+          IconButton(
+            onPressed: _fetchLocation,
+            icon: Icon(Icons.refresh_rounded, color: c.iconMuted, size: 22),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -274,7 +445,7 @@ class _HomeScreenState extends State<HomeScreen> {
         boxShadow: [
           if (!c.isDark)
             BoxShadow(
-              color: Colors.black.withOpacity(0.02),
+              color: Colors.black.withOpacity(0.04),
               blurRadius: 10,
               spreadRadius: 2,
             ),
@@ -282,18 +453,24 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: TextField(
         style: TextStyle(color: c.primaryText, fontSize: 14),
+        onChanged: (val) {
+          setState(() {
+            _searchQuery = val.trim().toLowerCase();
+          });
+        },
         decoration: InputDecoration(
           hintText: 'Search neighbors, groups or events...',
           hintStyle: TextStyle(color: c.secondaryText, fontSize: 14),
           prefixIcon: Icon(Icons.search, color: c.iconMuted),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
         ),
       ),
     );
   }
 
-  Widget _buildSectionHeader(ColonyColors c, String title, String action) {
+  Widget _buildSectionHeader(ColonyColors c, String title, String? action) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -305,28 +482,26 @@ class _HomeScreenState extends State<HomeScreen> {
             color: c.primaryText,
           ),
         ),
-        Text(
-          action,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: c.accent,
+        if (action != null)
+          Text(
+            action,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: c.accent,
+            ),
           ),
-        ),
       ],
     );
   }
 
   Widget _buildStoriesList(ColonyColors c) {
     if (_isLoadingStories) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: CircularProgressIndicator(color: c.accent),
-        ),
+      return SizedBox(
+        height: 100,
+        child: Center(child: CircularProgressIndicator(color: c.accent)),
       );
     }
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -335,14 +510,15 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 15),
           if (_stories.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-              child: Text('No stories yet', style: TextStyle(color: c.secondaryText)),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 20),
+              child: Text('No stories yet',
+                  style: TextStyle(color: c.secondaryText)),
             )
           else
             ..._stories.map((story) => Padding(
-              padding: const EdgeInsets.only(right: 15),
-              child: _buildStoryItem(c, story),
-            )),
+                  padding: const EdgeInsets.only(right: 15),
+                  child: _buildStoryItem(c, story),
+                )),
         ],
       ),
     );
@@ -350,12 +526,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildAddStoryBtn(ColonyColors c) {
     return GestureDetector(
-      onTap: () {
-        // TODO: Implement add story
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Add story feature coming soon!')),
-        );
-      },
+      onTap: _addStory,
       child: Column(
         children: [
           Container(
@@ -363,22 +534,116 @@ class _HomeScreenState extends State<HomeScreen> {
             height: 70,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.grey.shade400, width: 2, style: BorderStyle.solid),
+              border: Border.all(color: Colors.grey.shade400, width: 2),
             ),
             child: Icon(Icons.add, color: c.accent, size: 30),
           ),
           const SizedBox(height: 8),
-          Text('Add Story', style: TextStyle(fontSize: 12, color: c.secondaryText)),
+          Text('Add Story',
+              style: TextStyle(fontSize: 12, color: c.secondaryText)),
         ],
       ),
     );
   }
 
+  Future<void> _addStory() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
+    if (picked == null || !mounted) return;
+
+    // Show caption dialog
+    String? caption;
+    if (mounted) {
+      final captionController = TextEditingController();
+      caption = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Add Caption'),
+          content: TextField(
+            controller: captionController,
+            decoration: const InputDecoration(
+              hintText: 'Write a caption (optional)...'
+            ),
+            maxLines: 2,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Skip'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, captionController.text.trim()),
+              child: const Text('Next'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!mounted) return;
+
+    // Show uploading indicator
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 16, height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            ),
+            SizedBox(width: 12),
+            Text('Uploading story...'),
+          ],
+        ),
+        duration: Duration(seconds: 10),
+      ),
+    );
+
+    try {
+      final url = await StorageService().uploadAvatar(picked);
+      final ok = await _dataService.createStory(
+        mediaUrl: url,
+        mediaType: 'image',
+        caption: caption?.isNotEmpty == true ? caption : null,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      if (ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Story posted!'),
+            backgroundColor: Color(0xFF2E6B3B),
+          ),
+        );
+        _fetchStories();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to post story'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Widget _buildStoryItem(ColonyColors c, Story story) {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    final isOwn = story.userId == currentUserId;
     return GestureDetector(
-      onTap: () {
-        // TODO: View story
-      },
+      onTap: () => _viewStory(story, isOwn),
       child: Column(
         children: [
           Container(
@@ -398,7 +663,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            story.user.username ?? story.user.displayName ?? 'User',
+            isOwn ? 'My Story' : (story.user.username ?? story.user.displayName ?? 'User'),
             style: TextStyle(
               fontSize: 12,
               color: c.primaryText,
@@ -410,84 +675,209 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _viewStory(Story story, bool isOwn) {
+    final c = ColonyColors.of(context);
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Story image
+            GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: InteractiveViewer(
+                child: Image.network(
+                  story.mediaUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Center(
+                    child: Icon(Icons.broken_image, color: Colors.white, size: 64),
+                  ),
+                ),
+              ),
+            ),
+            // Top bar
+            Positioned(
+              top: 48,
+              left: 16,
+              right: 16,
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundImage: story.user.avatarUrl != null
+                        ? NetworkImage(story.user.avatarUrl!)
+                        : const NetworkImage('https://i.pravatar.cc/150'),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isOwn ? 'My Story' : (story.user.displayName ?? story.user.username ?? 'User'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            shadows: [Shadow(blurRadius: 4, color: Colors.black)],
+                          ),
+                        ),
+                        Text(
+                          _getTimeAgo(story.createdAt),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Delete button for own stories
+                  if (isOwn)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.white),
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        final ok = await _dataService.deleteStory(story.id);
+                        if (ok && mounted) _fetchStories();
+                      },
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            // Caption
+            if (story.caption != null && story.caption!.isNotEmpty)
+              Positioned(
+                bottom: 80,
+                left: 16,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    story.caption!,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _getTimeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
   Widget _buildNearbyPeoplesList(ColonyColors c) {
     if (_isLoadingUsers) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: CircularProgressIndicator(color: c.accent),
-        ),
+      return SizedBox(
+        height: 150,
+        child: Center(child: CircularProgressIndicator(color: c.accent)),
       );
     }
+    
+    final filteredUsers = _nearbyUsers.where((u) {
+      if (_searchQuery.isEmpty) return true;
+      final name = u.displayName ?? u.username ?? '';
+      return name.toLowerCase().contains(_searchQuery);
+    }).toList();
 
-    if (_nearbyUsers.isEmpty) {
+    if (filteredUsers.isEmpty) {
       return Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(vertical: 24),
         child: Column(
           children: [
             Icon(Icons.people_outline, size: 48, color: c.iconMuted),
             const SizedBox(height: 10),
             Text(
-              _userLocation == null 
-                  ? 'Enable location to see nearby people'
-                  : 'No people found within 5km',
+              _searchQuery.isNotEmpty 
+                  ? 'No people found matching "$_searchQuery"'
+                  : (_userLocation == null
+                      ? 'Enable location to see nearby people'
+                      : 'No people found within 5km'),
               style: TextStyle(color: c.secondaryText),
             ),
           ],
         ),
       );
     }
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: _nearbyUsers.map((user) {
+        children: filteredUsers.map((user) {
           return Padding(
             padding: const EdgeInsets.only(right: 15),
-            child: _buildPeopleCard(user),
+            child: _PeopleCard(
+              user: user, 
+              dataService: _dataService,
+              onRemove: () {
+                setState(() {
+                  _nearbyUsers.removeWhere((u) => u.id == user.id);
+                });
+              },
+            ),
           );
         }).toList(),
       ),
     );
   }
 
-  Widget _buildPeopleCard(NearbyUser user) {
-    return _PeopleCard(
-      user: user,
-      dataService: _dataService,
-    );
-  }
-
   Widget _buildNearbyGroupsList(ColonyColors c) {
     if (_isLoadingGroups) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: CircularProgressIndicator(color: c.accent),
-        ),
+      return SizedBox(
+        height: 100,
+        child: Center(child: CircularProgressIndicator(color: c.accent)),
       );
     }
 
-    if (_nearbyGroups.isEmpty) {
+    final filteredGroups = _nearbyGroups.where((g) {
+      if (_searchQuery.isEmpty) return true;
+      return g.name.toLowerCase().contains(_searchQuery) ||
+          (g.description?.toLowerCase().contains(_searchQuery) ?? false);
+    }).toList();
+
+    if (filteredGroups.isEmpty) {
       return Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(vertical: 24),
         child: Column(
           children: [
             Icon(Icons.group_outlined, size: 48, color: c.iconMuted),
             const SizedBox(height: 10),
             Text(
-              _userLocation == null 
-                  ? 'Enable location to see nearby groups'
-                  : 'No groups found within 5km',
+              _searchQuery.isNotEmpty
+                  ? 'No groups found matching "$_searchQuery"'
+                  : (_userLocation == null
+                      ? 'Enable location to see nearby groups'
+                      : 'No groups found within 5km'),
               style: TextStyle(color: c.secondaryText),
             ),
           ],
         ),
       );
     }
-
     return Column(
-      children: _nearbyGroups.take(3).map((group) {
+      children: filteredGroups.take(3).map((group) {
         return Padding(
           padding: const EdgeInsets.only(bottom: 15),
           child: _buildGroupCard(c, group),
@@ -516,7 +906,8 @@ class _HomeScreenState extends State<HomeScreen> {
             child: group.coverImageUrl != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(16),
-                    child: Image.network(group.coverImageUrl!, fit: BoxFit.cover),
+                    child:
+                        Image.network(group.coverImageUrl!, fit: BoxFit.cover),
                   )
                 : Icon(Icons.group, color: c.primaryText, size: 30),
           ),
@@ -528,7 +919,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         color: c.categoryChipBg,
                         borderRadius: BorderRadius.circular(8),
@@ -573,19 +965,20 @@ class _HomeScreenState extends State<HomeScreen> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(success ? 'Joined ${group.name}!' : 'Failed to join group'),
+                    content: Text(success
+                        ? 'Joined ${group.name}!'
+                        : 'Failed to join group'),
                     backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
-                if (success) {
-                  _fetchNearbyData();
-                }
+                if (success) _fetchNearbyData();
               }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: c.filledButtonBg,
               foregroundColor: c.filledButtonFg,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             child: const Text('Join'),
           ),
@@ -629,7 +1022,8 @@ class _HomeScreenState extends State<HomeScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: c.communityCtaFg,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
             ),
             child: const Text('Explore Community'),
           ),
@@ -639,25 +1033,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// People card widget with wave status and message button
+// People card widget
 class _PeopleCard extends StatefulWidget {
   final NearbyUser user;
   final DataService dataService;
+  final VoidCallback? onRemove;
 
-  const _PeopleCard({
-    required this.user,
-    required this.dataService,
-  });
+  const _PeopleCard({required this.user, required this.dataService, this.onRemove});
 
   @override
   State<_PeopleCard> createState() => _PeopleCardState();
 }
 
 class _PeopleCardState extends State<_PeopleCard> {
-  String? _waveStatus;
-  bool _canChat = false;
+  String? _friendStatus;
   bool _isLoading = true;
-  bool _isWaving = false;
+  bool _isSending = false;
 
   @override
   void initState() {
@@ -666,32 +1057,24 @@ class _PeopleCardState extends State<_PeopleCard> {
   }
 
   Future<void> _loadStatus() async {
-    final waveStatus = await widget.dataService.getWaveStatus(widget.user.id);
-    final canChat = await widget.dataService.canChatWith(widget.user.id);
+    final status = await widget.dataService.getFriendRequestStatus(widget.user.id);
     if (mounted) {
       setState(() {
-        _waveStatus = waveStatus;
-        _canChat = canChat;
+        _friendStatus = status;
         _isLoading = false;
       });
     }
   }
 
-  Future<void> _sendWave() async {
-    setState(() => _isWaving = true);
-    final success = await widget.dataService.sendWave(widget.user.id);
+  Future<void> _sendFriendRequest() async {
+    setState(() => _isSending = true);
+    final success = await widget.dataService.sendFriendRequest(widget.user.id);
     if (mounted) {
-      if (success) {
-        await _loadStatus();
-      }
-      setState(() => _isWaving = false);
+      if (success) await _loadStatus();
+      setState(() => _isSending = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            success
-                ? 'Wave sent!'
-                : 'Could not send wave — stay within 5 km with location enabled.',
-          ),
+          content: Text(success ? 'Friend request sent!' : 'Could not send request.'),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
@@ -699,7 +1082,8 @@ class _PeopleCardState extends State<_PeopleCard> {
   }
 
   Future<void> _openChat() async {
-    final conv = await widget.dataService.getOrCreateConversation(widget.user.id);
+    final conv =
+        await widget.dataService.getOrCreateConversation(widget.user.id);
     if (!mounted) return;
     if (conv == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -713,7 +1097,8 @@ class _PeopleCardState extends State<_PeopleCard> {
         builder: (context) => ChatDetailScreen(
           conversationId: conv.id,
           otherUserId: widget.user.id,
-          otherUserName: widget.user.displayName ?? widget.user.username ?? 'User',
+          otherUserName:
+              widget.user.displayName ?? widget.user.username ?? 'User',
           otherUserAvatar: widget.user.avatarUrl,
         ),
       ),
@@ -723,6 +1108,9 @@ class _PeopleCardState extends State<_PeopleCard> {
   @override
   Widget build(BuildContext context) {
     final c = ColonyColors.of(context);
+    final isFriend = _friendStatus == 'accepted' || _friendStatus == 'received_accepted';
+    final isRequested = _friendStatus == 'pending';
+
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -730,112 +1118,156 @@ class _PeopleCardState extends State<_PeopleCard> {
           MaterialPageRoute(
             builder: (context) => UserProfileScreen(userId: widget.user.id),
           ),
-        ).then((_) => _loadStatus()); // Refresh status when returning
+        ).then((_) => _loadStatus());
       },
       child: Container(
-        width: 160,
-        padding: const EdgeInsets.all(15),
+        width: 170, // Slightly wider for the buttons
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: c.rowCard,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: c.divider.withOpacity(c.isDark ? 0.4 : 0.2)),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+              color: c.divider.withOpacity(c.isDark ? 0.4 : 0.2)),
+          boxShadow: [
+            if (!c.isDark)
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: c.isDark ? c.pillBackground : Colors.black,
-                  backgroundImage: widget.user.avatarUrl != null
-                      ? NetworkImage(widget.user.avatarUrl!)
-                      : const NetworkImage('https://i.pravatar.cc/150'),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: c.pillBackground,
-                    borderRadius: BorderRadius.circular(12),
+            // Top large image
+            SizedBox(
+              height: 170,
+              width: double.infinity,
+              child: widget.user.avatarUrl != null
+                  ? Image.network(widget.user.avatarUrl!, fit: BoxFit.cover)
+                  : Image.network('https://ui-avatars.com/api/?name=${widget.user.displayName ?? widget.user.username ?? 'User'}&size=300&background=random', fit: BoxFit.cover),
+            ),
+            // Content below image
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.user.displayName ?? widget.user.username ?? 'User',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: c.primaryText,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  const SizedBox(height: 4),
+                  Row(
                     children: [
-                      Icon(Icons.location_on, size: 10, color: c.primaryText),
-                      const SizedBox(width: 2),
+                      Icon(Icons.location_on, size: 12, color: c.secondaryText),
+                      const SizedBox(width: 4),
                       Text(
-                        widget.user.displayDistance,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: c.primaryText,
-                        ),
+                        '${widget.user.displayDistance} away',
+                        style: TextStyle(fontSize: 12, color: c.secondaryText),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              widget.user.displayName ?? widget.user.username ?? 'User',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: c.primaryText,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              widget.user.bio ?? 'Colony Member',
-              style: TextStyle(fontSize: 12, color: c.secondaryText),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: _isLoading
-                  ? Center(
+                  const SizedBox(height: 12),
+                  // Action buttons
+                  if (_isLoading)
+                    const Center(
                       child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: c.accent),
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
                     )
-                  : _canChat
-                      ? ElevatedButton(
-                          onPressed: _openChat,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: c.filledButtonBg,
-                            foregroundColor: c.filledButtonFg,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                          child: const Text('Message', style: TextStyle(fontSize: 12)),
-                        )
-                      : ElevatedButton(
-                          onPressed: _isWaving || _waveStatus == 'pending' ? null : _sendWave,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFF17F36),
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: Colors.grey,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                          child: _isWaving
-                              ? const SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : Text(
-                                  _waveStatus == 'pending' ? 'Wave Sent' : 'Wave',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
+                  else if (isFriend)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _openChat,
+                        icon: const Icon(Icons.chat_bubble_outline, size: 16),
+                        label: const Text('Message',
+                            style: TextStyle(fontSize: 12)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1B5A27),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          elevation: 0,
                         ),
+                      ),
+                    )
+                  else
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 11,
+                          child: ElevatedButton(
+                            onPressed: (_isSending || isRequested)
+                                ? null
+                                : _sendFriendRequest,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isRequested ? Colors.grey : const Color(0xFF1877F2),
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.zero,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              elevation: 0,
+                            ),
+                            child: _isSending
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2, color: Colors.white),
+                                  )
+                                : Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        isRequested ? Icons.check : Icons.person_add,
+                                        size: 14,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        isRequested ? 'Sent' : 'Add',
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          flex: 9,
+                          child: ElevatedButton(
+                            onPressed: widget.onRemove,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: c.isDark ? const Color(0xFF333333) : const Color(0xFFE4E6EB),
+                              foregroundColor: c.isDark ? Colors.white : Colors.black87,
+                              padding: EdgeInsets.zero,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              elevation: 0,
+                            ),
+                            child: const Text('Remove',
+                                style: TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
             ),
           ],
         ),

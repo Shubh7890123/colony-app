@@ -85,5 +85,17 @@ class StorageService {
       file: file,
     );
   }
+
+  /// Uploads a chat image attachment and returns its public URL.
+  /// Images are stored in the 'chat_media' bucket under the sender's user ID.
+  Future<String> uploadChatMedia(XFile file) async {
+    final user = _client.auth.currentUser;
+    if (user == null) throw Exception('User not logged in');
+    return _uploadToBucket(
+      bucket: 'chat_media',
+      folder: user.id,
+      file: file,
+    );
+  }
 }
 

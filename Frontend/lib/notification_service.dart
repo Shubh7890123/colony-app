@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_service.dart';
 import 'package:http/http.dart' as http;
+import 'main.dart' show appNavigatorKey;
+import 'screens/chat_detail_screen.dart';
+import 'screens/notifications_screen.dart';
 
 // Background message handler (must be top-level function)
 @pragma('vm:entry-point')
@@ -310,19 +313,37 @@ class NotificationService {
 
   void _handleNotificationTap(Map<String, dynamic> data) {
     final type = data['type'] as String?;
-    final senderId = data['sender_id'] as String?;
     final conversationId = data['conversation_id'] as String?;
+    final senderName = data['sender_name'] as String?;
+    final senderAvatar = data['sender_avatar'] as String?;
+    final senderId = data['sender_id'] as String?;
 
-    // Navigation will be handled by the app's navigation system
-    // Store the data for later use when app is ready
-    print('Notification tapped: type=$type, senderId=$senderId');
-    
-    // You can use a global navigator or event bus to navigate
-    // For now, we'll just log it
-    // In production, implement navigation to:
-    // - Wave requests screen for type='wave'
-    // - Chat screen for type='message' with conversationId
-    // - Call screen for type='call'
+    final navigator = appNavigatorKey.currentState;
+    if (navigator == null) {
+      print('Navigator not ready yet — notification tap ignored');
+      return;
+    }
+
+    if (type == 'message' && conversationId != null) {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => ChatDetailScreen(
+            conversationId: conversationId,
+            otherUserId: senderId,
+            otherUserName: senderName ?? 'User',
+            otherUserAvatar: senderAvatar,
+          ),
+        ),
+      );
+    } else if (type == 'wave') {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => const NotificationsScreen(),
+        ),
+      );
+    } else {
+      print('Notification tapped: type=$type — no specific route defined');
+    }
   }
 
   /// Send notification to a specific user

@@ -38,7 +38,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Wave accepted! You can now chat.'),
+          content: Text('Friend request accepted! You can now chat.'),
           backgroundColor: Colors.green,
         ),
       );
@@ -51,7 +51,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Wave rejected.'),
+          content: Text('Friend request rejected.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -65,6 +65,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
+        toolbarHeight: 50,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         leading: IconButton(
@@ -115,7 +116,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'When someone sends you a wave request,\nit will appear here.',
+            'When someone sends you a friend request,\nit will appear here.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 14,
@@ -149,11 +150,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       decoration: BoxDecoration(
         color: c.card,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: c.divider.withValues(alpha: 0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
-            offset: const Offset(0, 2),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -175,11 +177,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               child: Row(
                 children: [
                   // Avatar
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundImage: senderAvatar != null
-                        ? NetworkImage(senderAvatar)
-                        : const NetworkImage('https://i.pravatar.cc/150'),
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: c.accent.withValues(alpha: 0.2), width: 2),
+                    ),
+                    child: CircleAvatar(
+                      radius: 28,
+                      backgroundImage: senderAvatar != null
+                          ? NetworkImage(senderAvatar)
+                          : const NetworkImage('https://i.pravatar.cc/150'),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   // Name and time
@@ -212,13 +220,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         Row(
                           children: [
                             Icon(
-                              Icons.waving_hand,
+                              Icons.person_add_outlined,
                               size: 16,
-                              color: Colors.orange.shade700,
+                              color: c.accent,
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              'sent you a wave request',
+                              'sent you a friend request',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: c.secondaryText,

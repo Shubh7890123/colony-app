@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../colony_theme.dart';
 import 'home_screen.dart';
 import 'groups_screen.dart';
 import 'chat_list_screen.dart';
 import 'profile_screen.dart';
-import 'notifications_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -16,9 +14,6 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
-  int _notificationCount = 0;
-  late final SupabaseClient _supabase;
-  RealtimeChannel? _notificationChannel;
 
   final List<Widget> _screens = [
     const HomeScreen(),
@@ -30,64 +25,25 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   void initState() {
     super.initState();
-    _supabase = Supabase.instance.client;
-    _fetchNotificationCount();
-    _subscribeToNotifications();
   }
 
   @override
   void dispose() {
-    _notificationChannel?.unsubscribe();
     super.dispose();
   }
 
-  Future<void> _fetchNotificationCount() async {
-    try {
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) return;
 
-      // Count pending wave requests
-      final response = await _supabase
-          .from('waves')
-          .select('id')
-          .eq('receiver_id', userId)
-          .eq('status', 'pending');
-
-      if (mounted) {
-        setState(() {
-          _notificationCount = response.length;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error fetching notification count: $e');
+  String _getAppBarTitle(int index) {
+    switch (index) {
+      case 1:
+        return 'Groups';
+      case 2:
+        return 'Chats';
+      case 3:
+        return 'Profile';
+      default:
+        return 'Colony';
     }
-  }
-
-  void _subscribeToNotifications() {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) return;
-
-    // Subscribe to waves table changes
-    _notificationChannel = _supabase.channel('notifications_$userId');
-    
-    _notificationChannel!.onPostgresChanges(
-      event: PostgresChangeEvent.all,
-      schema: 'public',
-      table: 'waves',
-      callback: (payload) {
-        // Refresh notification count when waves change
-        _fetchNotificationCount();
-      },
-    ).subscribe();
-  }
-
-  void _navigateToNotifications() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const NotificationsScreen()),
-    );
-    // Refresh count after returning from notifications screen
-    _fetchNotificationCount();
   }
 
   @override
@@ -97,60 +53,29 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
     return Scaffold(
       backgroundColor: c.scaffold,
-      appBar: _currentIndex == 0
-          ? AppBar(
+      appBar: (_currentIndex == 0)
+          ? null
+          : AppBar(
+              toolbarHeight: 50,
               backgroundColor: c.scaffold,
-              elevation: 0,
+              elevation: (_currentIndex == 1) ? 0 : 1,
               title: Text(
-                'Colony',
+                _getAppBarTitle(_currentIndex),
                 style: TextStyle(
                   color: c.accent,
-                  fontSize: 24,
+                  fontSize: 22,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               actions: [
-                Stack(
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        Icons.notifications_outlined,
-                        color: c.accent,
-                        size: 28,
-                      ),
-                      onPressed: _navigateToNotifications,
-                    ),
-                    if (_notificationCount > 0)
-                      Positioned(
-                        right: 8,
-                        top: 8,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: const BoxDecoration(
-                            color: Colors.red,
-                            shape: BoxShape.circle,
-                          ),
-                          constraints: const BoxConstraints(
-                            minWidth: 18,
-                            minHeight: 18,
-                          ),
-                          child: Text(
-                            _notificationCount > 99 ? '99+' : '$_notificationCount',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+                if (_currentIndex == 2)
+                  IconButton(
+                    icon: Icon(Icons.search, color: c.accent),
+                    onPressed: () {},
+                  ),
                 const SizedBox(width: 8),
               ],
-            )
-          : null,
+            ),
       body: IndexedStack(
         index: _currentIndex,
         children: _screens,

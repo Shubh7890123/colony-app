@@ -49,8 +49,19 @@ class LocationService {
       List<Placemark> placemarks = await placemarkFromCoordinates(latitude, longitude);
       if (placemarks.isNotEmpty) {
         Placemark place = placemarks.first;
-        // Format: "Colony Name, Area, City"
+        // Format: "Landmark, Area, City"
         List<String> parts = [];
+        
+        // Add specific name or street (e.g., Mridula Vihar)
+        if (place.name != null && place.name!.isNotEmpty && !place.name!.contains('+')) {
+          if (place.name != place.subLocality && place.name != place.locality) {
+            parts.add(place.name!);
+          }
+        } else if (place.street != null && place.street!.isNotEmpty && !place.street!.contains('+')) {
+          if (place.street != place.subLocality && place.street != place.locality) {
+            parts.add(place.street!);
+          }
+        }
         
         // Add sublocality (colony/area)
         if (place.subLocality != null && place.subLocality!.isNotEmpty) {

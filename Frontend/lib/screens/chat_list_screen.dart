@@ -165,11 +165,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
       MaterialPageRoute(
         builder: (context) => ChatDetailScreen(
           conversationId: conversation.id,
-          otherUserName: conversation.otherUser?.displayName ?? 
-                          conversation.otherUser?.username ?? 
+          otherUserId: conversation.otherUser?.id,
+          otherUserName: conversation.otherUser?.displayName ??
+                          conversation.otherUser?.username ??
                           'User',
           otherUserAvatar: conversation.otherUser?.avatarUrl,
-          otherUserId: conversation.otherUser?.id,
         ),
       ),
     ).then((_) => _loadConversations());
@@ -212,18 +212,217 @@ class _ChatListScreenState extends State<ChatListScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // TODO: Show new message screen to search users
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('New message feature coming soon!')),
-          );
-        },
+        onPressed: _showNewMessageSheet,
         backgroundColor: c.fabBackground,
         elevation: 2,
         child: Icon(Icons.edit_square, color: c.fabForeground, size: 28),
       ),
     );
   }
+
+  void _showNewMessageSheet() {
+    final c = ColonyColors.of(context);
+    final searchController = TextEditingController();
+    List<Map<String, dynamic>> results = [];
+    bool isSearching = false;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Future<void> search(String query) async {
+              if (query.trim().isEmpty) {
+                setSheetState(() => results = []);
+                return;
+              }
+              setSheetState(() => isSearching = true);
+              try {
+                final client = SupabaseService().client;
+                final currentUserId = client.auth.currentUser?.id;
+                final response = await client
+                    .from('profiles')
+                    .select('id, username, display_name, avatar_url')
+                    .or('username.ilike.%${query.trim()}%,display_name.ilike.%${query.trim()}%')
+                    .neq('id', currentUserId ?? '')
+                    .limit(20);
+                setSheetState(() {
+                  results = List<Map<String, dynamic>>.from(response as List);
+                  isSearching = false;
+                });
+              } catch (_) {
+                setSheetState(() => isSearching = false);
+              }
+            }
+
+            return DraggableScrollableSheet(
+              initialChildSize: 0.85,
+              maxChildSize: 0.95,
+              minChildSize: 0.5,
+              builder: (_, scrollController) {
+                return Container(
+                  decoration: BoxDecoration(
+                    color: c.card,
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(24)),
+                  ),
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 12),
+                      Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: c.divider,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Text(
+                          'New Message',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: c.primaryText,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: c.searchBarFill,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color: c.divider.withOpacity(0.4)),
+                          ),
+                          child: TextField(
+                            controller: searchController,
+                            autofocus: true,
+                            style: TextStyle(
+                                color: c.primaryText, fontSize: 14),
+                            onChanged: (v) => search(v),
+                            decoration: InputDecoration(
+                              hintText: 'Search by name or username...',
+                              hintStyle: TextStyle(
+                                  color: c.secondaryText, fontSize: 14),
+                              prefixIcon:
+                                  Icon(Icons.search, color: c.iconMuted),
+                              suffixIcon: isSearching
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: c.accent,
+                                        ),
+                                      ),
+                                    )
+                                  : null,
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 14),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: results.isEmpty
+                            ? Center(
+                                child: Text(
+                                  searchController.text.isEmpty
+                                      ? 'Search for someone to message'
+                                      : 'No users found',
+                                  style: TextStyle(
+                                      color: c.secondaryText, fontSize: 14),
+                                ),
+                              )
+                            : ListView.builder(
+                                controller: scrollController,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 4),
+                                itemCount: results.length,
+                                itemBuilder: (context, index) {
+                                  final user = results[index];
+                                  final name = user['display_name'] ??
+                                      user['username'] ??
+                                      'User';
+                                  final username = user['username'];
+                                  final avatar = user['avatar_url'];
+                                  return ListTile(
+                                    contentPadding:
+                                        const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 4),
+                                    leading: CircleAvatar(
+                                      radius: 22,
+                                      backgroundImage: avatar != null
+                                          ? NetworkImage(avatar)
+                                          : const NetworkImage(
+                                              'https://i.pravatar.cc/150'),
+                                    ),
+                                    title: Text(
+                                      name,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: c.primaryText,
+                                      ),
+                                    ),
+                                    subtitle: username != null
+                                        ? Text('@$username',
+                                            style: TextStyle(
+                                                color: c.secondaryText,
+                                                fontSize: 12))
+                                        : null,
+                                    onTap: () async {
+                                      Navigator.pop(sheetContext);
+                                      final conv = await _dataService
+                                          .getOrCreateConversation(
+                                              user['id']);
+                                      if (!mounted) return;
+                                      if (conv == null) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(const SnackBar(
+                                          content: Text(
+                                              'Accept each other\'s friend request first to chat'),
+                                          backgroundColor: Colors.orange,
+                                        ));
+                                        return;
+                                      }
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => ChatDetailScreen(
+                                            conversationId: conv.id,
+                                            otherUserId: user['id'],
+                                            otherUserName: name,
+                                            otherUserAvatar: avatar,
+                                          ),
+                                        ),
+                                      ).then((_) => _loadConversations());
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
 
   Widget _buildPendingWavesSection(ColonyColors c) {
     if (_isLoadingWaves) {

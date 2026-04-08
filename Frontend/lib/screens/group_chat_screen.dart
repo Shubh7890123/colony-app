@@ -1,6 +1,5 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../colony_theme.dart';
 import '../data_service.dart';
@@ -31,23 +30,55 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   List<GroupMessage> _messages = [];
   bool _loading = true;
   bool _sending = false;
-  StreamSubscription<void>? _pollSub;
+  RealtimeChannel? _messagesChannel;
 
   @override
   void initState() {
     super.initState();
     _load();
-    _pollSub = Stream.periodic(const Duration(seconds: 3), (_) {}).listen((_) {
-      _silentRefresh();
-    });
+    _setupRealtimeSubscription();
   }
 
   @override
   void dispose() {
-    _pollSub?.cancel();
+    _messagesChannel?.unsubscribe();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _setupRealtimeSubscription() {
+    _messagesChannel?.unsubscribe();
+    _messagesChannel = Supabase.instance.client
+        .channel('group_chat_${widget.groupId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'group_messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'group_id',
+            value: widget.groupId,
+          ),
+          callback: (payload) => _onNewRealtimeMessage(payload),
+        )
+        .subscribe();
+  }
+
+  void _onNewRealtimeMessage(PostgresChangePayload payload) {
+    if (!mounted) return;
+    final newRow = payload.newRecord;
+    if (newRow.isEmpty) return;
+    final msgId = newRow['id']?.toString();
+    if (msgId == null) return;
+    // Avoid duplicates
+    if (_messages.any((m) => m.id == msgId)) return;
+
+    final newMsg = GroupMessage.fromJson(newRow);
+    setState(() {
+      _messages = [..._messages, newMsg];
+    });
+    _scrollToEnd();
   }
 
   Future<void> _load() async {
@@ -61,12 +92,6 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     _scrollToEnd();
   }
 
-  Future<void> _silentRefresh() async {
-    if (!mounted || _loading) return;
-    final list = await _dataService.getGroupMessages(widget.groupId);
-    if (!mounted) return;
-    setState(() => _messages = list);
-  }
 
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -121,6 +146,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
+        toolbarHeight: 50,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         leading: IconButton(

@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../colony_theme.dart';
 import '../data_service.dart';
 import '../supabase_service.dart';
 import '../encryption_service.dart';
+import '../storage_service.dart';
 import 'user_profile_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -33,6 +37,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isLoading = true;
   String? _conversationId;
   bool _isSending = false;
+  bool _isSendingMedia = false;
   bool _encryptionReady = false;
   
   // Online status tracking
@@ -43,8 +48,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   /// Resolved peer (may be filled from DB when opening chat with only [conversationId]).
   String? _peerUserId;
   
-  // Polling for new messages (fallback for realtime)
-  Stream<void>? _pollingStream;
+  // Realtime subscription for new messages
+  RealtimeChannel? _messagesChannel;
+  StreamSubscription<void>? _pollingSubscription;
 
   String get _peerDisplayName {
     final p = _otherUserProfile;
@@ -139,15 +145,77 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   void _setupRealtimeSubscription() {
     if (_conversationId == null) return;
-    
-    // Try to use Supabase Realtime if available
-    // Otherwise fall back to polling every 3 seconds
-    _pollingStream = Stream.periodic(const Duration(seconds: 3), (_) {
-      _checkForNewMessages();
-      _checkOnlineStatus();
+
+    // Use Supabase Realtime for instant message updates
+    _messagesChannel?.unsubscribe();
+    _messagesChannel = Supabase.instance.client
+        .channel('chat_${_conversationId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'conversation_id',
+            value: _conversationId!,
+          ),
+          callback: (payload) => _onNewRealtimeMessage(payload),
+        )
+        .subscribe();
+
+    // Poll online status every 30 seconds (less aggressive)
+    _pollingSubscription = Stream.periodic(
+      const Duration(seconds: 30),
+      (_) => _checkOnlineStatus(),
+    ).listen((_) {});
+  }
+
+  void _onNewRealtimeMessage(PostgresChangePayload payload) async {
+    if (!mounted) return;
+    final newRow = payload.newRecord;
+    if (newRow.isEmpty) return;
+    final msgId = newRow['id']?.toString();
+    if (msgId == null) return;
+    // Avoid duplicates
+    if (_messages.any((m) => m.id == msgId)) return;
+
+    final newMsg = Message.fromJson(newRow);
+    String displayContent = newMsg.content;
+
+    // Decrypt if needed
+    if (_encryptionReady && _peerUserId != null &&
+        newMsg.content.startsWith('{') && newMsg.content.contains('ciphertext')) {
+      try {
+        final encryptedJson = <String, dynamic>{};
+        final regex = RegExp(r'"(\w+)":"([^"]*)"');
+        for (final match in regex.allMatches(newMsg.content)) {
+          encryptedJson[match.group(1)!] = match.group(2)!;
+        }
+        final encryptedMsg = EncryptedMessage.fromJson(encryptedJson);
+        displayContent = await _encryptionService.decryptMessage(
+          encryptedMessage: encryptedMsg,
+          senderId: newMsg.senderId,
+        );
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _messages.add(Message(
+        id: newMsg.id,
+        senderId: newMsg.senderId,
+        content: displayContent,
+        isRead: newMsg.isRead,
+        createdAt: newMsg.createdAt,
+        deliveredAt: newMsg.deliveredAt,
+        seenAt: newMsg.seenAt,
+      ));
     });
-    
-    _pollingStream!.listen((_) {});
+    _scrollToBottom();
+    // Mark as seen immediately
+    if (_conversationId != null) {
+      await _dataService.markMessagesAsSeen(_conversationId!);
+    }
   }
 
   Future<void> _checkOnlineStatus() async {
@@ -170,110 +238,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     await _dataService.updateLastSeen();
   }
   
-  DateTime? _lastMessageTime;
-  
-  Future<void> _checkForNewMessages() async {
-    if (_conversationId == null || !mounted) return;
-    
-    try {
-      final messages = await _dataService.getMessages(_conversationId!);
-      
-      // Check if there are new messages
-      if (_lastMessageTime != null) {
-        final newMessages = messages.where((m) =>
-          m.createdAt.isAfter(_lastMessageTime!) &&
-          !_messages.any((existing) => existing.id == m.id)
-        ).toList();
-        
-        if (newMessages.isNotEmpty) {
-          for (final newMessage in newMessages) {
-            // Decrypt if needed
-            if (_encryptionReady && _peerUserId != null) {
-              try {
-                if (newMessage.content.startsWith('{') && newMessage.content.contains('ciphertext')) {
-                  final encryptedData = newMessage.content;
-                  final encryptedJson = <String, dynamic>{};
-                  final regex = RegExp(r'"(\w+)":"([^"]*)"');
-                  for (final match in regex.allMatches(encryptedData)) {
-                    encryptedJson[match.group(1)!] = match.group(2)!;
-                  }
-                  
-                  final encryptedMsg = EncryptedMessage.fromJson(encryptedJson);
-                  final decryptedContent = await _encryptionService.decryptMessage(
-                    encryptedMessage: encryptedMsg,
-                    senderId: newMessage.senderId,
-                  );
-                  
-                  final decryptedMessage = Message(
-                    id: newMessage.id,
-                    senderId: newMessage.senderId,
-                    content: decryptedContent,
-                    isRead: newMessage.isRead,
-                    createdAt: newMessage.createdAt,
-                    deliveredAt: newMessage.deliveredAt,
-                    seenAt: newMessage.seenAt,
-                  );
-                  
-                  if (mounted) {
-                    setState(() {
-                      if (!_messages.any((m) => m.id == decryptedMessage.id)) {
-                        _messages.add(decryptedMessage);
-                      }
-                    });
-                  }
-                } else {
-                  if (mounted) {
-                    setState(() {
-                      if (!_messages.any((m) => m.id == newMessage.id)) {
-                        _messages.add(newMessage);
-                      }
-                    });
-                  }
-                }
-              } catch (e) {
-                print('Error decrypting polled message: $e');
-                if (mounted) {
-                  setState(() {
-                    if (!_messages.any((m) => m.id == newMessage.id)) {
-                      _messages.add(newMessage);
-                    }
-                  });
-                }
-              }
-            } else {
-              if (mounted) {
-                setState(() {
-                  if (!_messages.any((m) => m.id == newMessage.id)) {
-                    _messages.add(newMessage);
-                  }
-                });
-              }
-            }
-          }
-          
-          if (mounted) {
-            _scrollToBottom();
-          }
-        }
-      }
-      
-      // Update last message time
-      if (messages.isNotEmpty) {
-        _lastMessageTime = messages.map((m) => m.createdAt).reduce((a, b) =>
-          a.isAfter(b) ? a : b
-        );
-      }
-    } catch (e) {
-      print('Error polling for messages: $e');
-    }
-  }
+
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    // Cancel polling stream
-    // Note: StreamSubscription would need to be stored for proper cancellation
+    _messagesChannel?.unsubscribe();
+    _pollingSubscription?.cancel();
     super.dispose();
   }
 
@@ -344,23 +316,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           _messages = decryptedMessages;
           _isLoading = false;
         });
-        // Set initial last message time for polling
-        if (decryptedMessages.isNotEmpty) {
-          _lastMessageTime = decryptedMessages.map((m) => m.createdAt).reduce((a, b) =>
-            a.isAfter(b) ? a : b
-          );
-        }
+
       } else {
         setState(() {
           _messages = messages;
           _isLoading = false;
         });
-        // Set initial last message time for polling
-        if (messages.isNotEmpty) {
-          _lastMessageTime = messages.map((m) => m.createdAt).reduce((a, b) =>
-            a.isAfter(b) ? a : b
-          );
-        }
+
       }
       _scrollToBottom();
       // Mark messages as delivered and seen when opening chat
@@ -464,6 +426,34 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
+  Future<void> _sendImageMessage() async {
+    if (_conversationId == null || _isSendingMedia) return;
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (picked == null || !mounted) return;
+
+    setState(() => _isSendingMedia = true);
+    try {
+      final url = await StorageService().uploadChatMedia(picked);
+      await _dataService.sendMessage(
+        conversationId: _conversationId!,
+        content: '',
+        mediaUrl: url,
+        mediaType: 'image',
+        targetUserId: _peerUserId,
+      );
+      // Real-time subscription will append the message automatically;
+      // nothing extra needed here.
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send image: \$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isSendingMedia = false);
+    }
+  }
+
   String _formatTime(DateTime dateTime) {
     final hour = dateTime.hour > 12 ? dateTime.hour - 12 : dateTime.hour;
     final ampm = dateTime.hour >= 12 ? 'PM' : 'AM';
@@ -489,7 +479,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(80),
+        preferredSize: const Size.fromHeight(60),
         child: _buildAppBar(),
       ),
       body: Column(
@@ -790,12 +780,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 message.content,
                 _formatTime(message.createdAt),
                 status: message.status,
+                mediaUrl: message.mediaUrl,
+                mediaType: message.mediaType,
               )
             else
               _buildIncomingMsg(
                 message.content,
                 _formatTime(message.createdAt),
                 _peerAvatarUrl,
+                mediaUrl: message.mediaUrl,
+                mediaType: message.mediaType,
               ),
             const SizedBox(height: 16),
           ],
@@ -835,7 +829,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  Widget _buildIncomingMsg(String msg, String time, String? avatarUrl) {
+  Widget _buildIncomingMsg(String msg, String time, String? avatarUrl,
+      {String? mediaUrl, String? mediaType}) {
+    final hasImage = mediaType == 'image' && mediaUrl != null;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
@@ -848,7 +844,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         const SizedBox(width: 10),
         Flexible(
           child: Container(
-            padding: const EdgeInsets.all(16),
+            padding: hasImage && msg.isEmpty
+                ? const EdgeInsets.all(6)
+                : const EdgeInsets.all(16),
             decoration: const BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.only(
@@ -860,32 +858,38 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  msg,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF2C3E30),
-                    height: 1.4,
+                if (hasImage)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      mediaUrl,
+                      width: 220,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (_, child, progress) => progress == null
+                          ? child
+                          : const SizedBox(
+                              width: 220, height: 160,
+                              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                            ),
+                      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 48),
+                    ),
                   ),
-                ),
+                if (msg.isNotEmpty) ...[
+                  if (hasImage) const SizedBox(height: 6),
+                  Text(msg,
+                      style: const TextStyle(
+                        fontSize: 14, color: Color(0xFF2C3E30), height: 1.4)),
+                ],
                 const SizedBox(height: 6),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      time,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade500,
-                      ),
-                    ),
+                    Text(time,
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
                     const SizedBox(width: 4),
-                    Icon(
-                      Icons.lock,
-                      size: 10,
-                      color: Colors.grey.shade500,
-                    ),
+                    Icon(Icons.lock, size: 10, color: Colors.grey.shade500),
                   ],
                 ),
               ],
@@ -896,8 +900,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  Widget _buildOutgoingMsg(String msg, String time, {MessageStatus status = MessageStatus.sent}) {
-    // Determine tick icon and color based on status
+  Widget _buildOutgoingMsg(String msg, String time,
+      {MessageStatus status = MessageStatus.sent,
+      String? mediaUrl,
+      String? mediaType}) {
+    final hasImage = mediaType == 'image' && mediaUrl != null;
     IconData tickIcon;
     Color tickColor;
     
@@ -922,7 +929,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       children: [
         Flexible(
           child: Container(
-            padding: const EdgeInsets.all(16),
+            padding: hasImage && msg.isEmpty
+                ? const EdgeInsets.all(6)
+                : const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: const Color(0xFF1E5631),
               borderRadius: const BorderRadius.only(
@@ -934,38 +943,43 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  msg,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.white,
-                    height: 1.4,
+                if (hasImage)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      mediaUrl,
+                      width: 220,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (_, child, progress) => progress == null
+                          ? child
+                          : const SizedBox(
+                              width: 220, height: 160,
+                              child: Center(child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white)),
+                            ),
+                      errorBuilder: (_, __, ___) =>
+                          const Icon(Icons.broken_image, size: 48, color: Colors.white70),
+                    ),
                   ),
-                ),
+                if (msg.isNotEmpty) ...[
+                  if (hasImage) const SizedBox(height: 6),
+                  Text(msg,
+                      style: const TextStyle(
+                          fontSize: 14, color: Colors.white, height: 1.4)),
+                ],
                 const SizedBox(height: 6),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      time,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.white.withOpacity(0.7),
-                      ),
-                    ),
+                    Text(time,
+                        style: TextStyle(
+                            fontSize: 10, color: Colors.white.withOpacity(0.7))),
                     const SizedBox(width: 4),
-                    Icon(
-                      tickIcon,
-                      size: 14,
-                      color: tickColor,
-                    ),
+                    Icon(tickIcon, size: 14, color: tickColor),
                     const SizedBox(width: 2),
-                    Icon(
-                      Icons.lock,
-                      size: 10,
-                      color: Colors.white.withOpacity(0.7),
-                    ),
+                    Icon(Icons.lock, size: 10, color: Colors.white.withOpacity(0.7)),
                   ],
                 ),
               ],
@@ -1002,16 +1016,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: fieldBg,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              Icons.add,
-              color: iconAccent,
-              size: 24,
+          GestureDetector(
+            onTap: _isSendingMedia ? null : _sendImageMessage,
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: fieldBg,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: _isSendingMedia
+                  ? SizedBox(
+                      width: 24, height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: iconAccent),
+                    )
+                  : Icon(Icons.image_outlined, color: iconAccent, size: 24),
             ),
           ),
           const SizedBox(width: 12),

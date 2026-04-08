@@ -6,6 +6,9 @@ import 'screens/device_auth_gate.dart';
 import 'notification_service.dart';
 import 'theme_controller.dart';
 
+/// Global navigator key — lets NotificationService push routes without a BuildContext.
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -41,6 +44,7 @@ class ColonyApp extends StatelessWidget {
               ? ThemeMode.dark
               : ThemeMode.light,
           home: const DeviceAuthGate(),
+          navigatorKey: appNavigatorKey,
         );
       },
     );

@@ -222,6 +222,101 @@ class DataService {
   }
 
   // ============================================
+  // FRIEND REQUEST SYSTEM (uses waves table)
+  // ============================================
+
+  /// Send a friend request to [receiverId]. Returns true if sent.
+  Future<bool> sendFriendRequest(String receiverId) async {
+    return sendWave(receiverId);
+  }
+
+  /// Remove a friend (delete the wave record in both directions).
+  Future<bool> removeFriend(String friendId) async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) return false;
+
+      // Delete wave sent by current user to friend
+      await _client
+          .from('waves')
+          .delete()
+          .eq('sender_id', user.id)
+          .eq('receiver_id', friendId);
+
+      // Delete wave sent by friend to current user
+      await _client
+          .from('waves')
+          .delete()
+          .eq('sender_id', friendId)
+          .eq('receiver_id', user.id);
+
+      return true;
+    } catch (e) {
+      print('Error removing friend: \$e');
+      return false;
+    }
+  }
+
+  /// Get friend request status between current user and [targetUserId].
+  /// Returns: 'pending' | 'accepted' | 'rejected' | 'received' | 'received_accepted' | null
+  Future<String?> getFriendRequestStatus(String targetUserId) async {
+    return getWaveStatus(targetUserId);
+  }
+
+  /// Count friends (accepted waves) for [userId].
+  Future<int> getFriendsCount(String userId) async {
+    try {
+      final sentAccepted = await _client
+          .from('waves')
+          .select('id')
+          .eq('sender_id', userId)
+          .eq('status', 'accepted');
+
+      final receivedAccepted = await _client
+          .from('waves')
+          .select('id')
+          .eq('receiver_id', userId)
+          .eq('status', 'accepted');
+
+      final sentCount = (sentAccepted as List).length;
+      final receivedCount = (receivedAccepted as List).length;
+      return sentCount + receivedCount;
+    } catch (e) {
+      print('Error fetching friends count: \$e');
+      return 0;
+    }
+  }
+
+  /// Count groups that [userId] is a member of.
+  Future<int> getUserGroupsCount(String userId) async {
+    try {
+      final rows = await _client
+          .from('group_members')
+          .select('group_id')
+          .eq('user_id', userId);
+      return (rows as List).length;
+    } catch (e) {
+      print('Error fetching groups count: \$e');
+      return 0;
+    }
+  }
+
+  /// Count active (non-expired) stories posted by [userId].
+  Future<int> getUserStoriesCount(String userId) async {
+    try {
+      final rows = await _client
+          .from('stories')
+          .select('id')
+          .eq('user_id', userId)
+          .gt('expires_at', DateTime.now().toUtc().toIso8601String());
+      return (rows as List).length;
+    } catch (e) {
+      print('Error fetching stories count: \$e');
+      return 0;
+    }
+  }
+
+  // ============================================
   // WAVES
   // ============================================
 
@@ -378,6 +473,7 @@ class DataService {
             user1_id,
             user2_id,
             messages (
+              id,
               content,
               created_at,
               sender_id,

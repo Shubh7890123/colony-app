@@ -21,7 +21,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   
   int _friendsCount = 0;
   int _groupsCount = 0;
-  int _postsCount = 0;
+  int _storiesCount = 0;
   String _locationText = 'Unknown';
   bool _isLoading = true;
   UserProfile? _userProfile;
@@ -37,18 +37,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final userId = SupabaseService().client.auth.currentUser?.id;
     if (userId == null) return;
 
-    // Get user profile
-    final profile = await _dataService.getUserProfile(userId);
-    
-    // Get user location
-    final location = await LocationService().getUserLocation();
-    
-    // TODO: Implement actual counts from backend
-    // For now, use placeholder values
-    
+    // Run all fetches in parallel
+    final results = await Future.wait([
+      _dataService.getUserProfile(userId),
+      LocationService().getUserLocation(),
+      _dataService.getFriendsCount(userId),
+      _dataService.getUserGroupsCount(userId),
+      _dataService.getUserStoriesCount(userId),
+    ]);
+
+    if (!mounted) return;
     setState(() {
-      _userProfile = profile;
+      _userProfile = results[0] as UserProfile?;
+      final location = results[1] as UserLocation?;
       _locationText = location?.locationText ?? 'Unknown';
+      _friendsCount = results[2] as int;
+      _groupsCount = results[3] as int;
+      _storiesCount = results[4] as int;
       _isLoading = false;
     });
   }
@@ -197,9 +202,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     );
                   }, c),
-                  _buildSettingsTile(Icons.lock_outline, 'Privacy', () {}, c),
-                  _buildSettingsTile(Icons.help_outline, 'Help & Support', () {}, c),
-                  _buildSettingsTile(Icons.info_outline, 'About', () {}, c),
+                  _buildSettingsTile(Icons.lock_outline, 'Privacy', () {
+                    Navigator.pop(sheetCtx);
+                    _showPrivacyDialog(context);
+                  }, c),
+                  _buildSettingsTile(Icons.help_outline, 'Help & Support', () {
+                    Navigator.pop(sheetCtx);
+                    _showHelpDialog(context);
+                  }, c),
+                  _buildSettingsTile(Icons.info_outline, 'About', () {
+                    Navigator.pop(sheetCtx);
+                    _showAboutDialog(context);
+                  }, c),
                   Divider(height: 32, color: c.divider),
                   _buildLogoutTile(context, sheetCtx, c),
                   const SizedBox(height: 24),
@@ -254,9 +268,122 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  void _showPrivacyDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Privacy'),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Your Privacy on Colony', style: TextStyle(fontWeight: FontWeight.bold)),
+              SizedBox(height: 8),
+              Text(
+                '• Your exact location is never shared publicly. Only users within 5 km can discover you.\n'
+                '• All 1:1 messages are end-to-end encrypted — not even Colony can read them.\n'
+                '• Your profile is visible only to nearby users within your discovery radius.\n'
+                '• You can remove friends at any time from their profile.\n'
+                '• You can block users by tapping the ⋮ menu on their profile.',
+                style: TextStyle(height: 1.6),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHelpDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Help & Support'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Text('Frequently Asked Questions',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              SizedBox(height: 8),
+              Text('Q: Why can\'t I see nearby people?',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text('A: Make sure location permissions are granted in device settings.\n'),
+              Text('Q: Why can\'t I chat with someone?',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text('A: Both users need to accept each other\'s wave (friend request) first.\n'),
+              Text('Q: How do I delete my account?',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              Text('A: Contact support at support@colony.app\n'),
+              Divider(),
+              SizedBox(height: 4),
+              Text('Contact Us', style: TextStyle(fontWeight: FontWeight.bold)),
+              SizedBox(height: 4),
+              Text('Email: support@colony.app'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAboutDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('About Colony'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.location_on, size: 48, color: Color(0xFF1B5A27)),
+            SizedBox(height: 12),
+            Text(
+              'Colony',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 4),
+            Text('Version 1.0.0', style: TextStyle(color: Colors.grey)),
+            SizedBox(height: 12),
+            Text(
+              'Colony connects you with people nearby. Discover neighbors, join local groups, and chat securely — all within your 5 km community.',
+              textAlign: TextAlign.center,
+              style: TextStyle(height: 1.5),
+            ),
+            SizedBox(height: 12),
+            Text('© 2026 Colony App', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showEditProfileDialog(BuildContext context) {
-    final displayNameController = TextEditingController();
-    final bioController = TextEditingController();
+    final displayNameController = TextEditingController(
+      text: _userProfile?.displayName ?? '',
+    );
+    final bioController = TextEditingController(
+      text: _userProfile?.bio ?? '',
+    );
     
     showDialog(
       context: context,
@@ -690,7 +817,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildDivider(c),
           _buildStatItem('$_groupsCount', 'GROUPS', c),
           _buildDivider(c),
-          _buildStatItem('$_postsCount', 'POSTS', c),
+          _buildStatItem('$_storiesCount', 'STORIES', c),
         ],
       ),
     );
