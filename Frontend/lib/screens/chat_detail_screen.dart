@@ -479,13 +479,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(60),
+        preferredSize: const Size.fromHeight(72),
         child: _buildAppBar(),
       ),
       body: Column(
         children: [
-          // E2E Encryption Banner
-          _buildEncryptionBanner(),
           Expanded(
             child: _isLoading
                 ? const Center(
@@ -498,43 +496,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     : _buildMessagesList(),
           ),
           _buildMessageInput(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEncryptionBanner() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.lock,
-            size: 16,
-            color: Colors.grey.shade600,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Messages and calls are secured with end-to-end encryption, ensuring that only the people in this chat can read, listen to, or share them. No one else — not even Colony — can access your conversations or calls. Enjoy a completely private and anonymous chatting experience.',
-              style: TextStyle(
-                fontSize: 11,
-                color: Colors.grey.shade600,
-                height: 1.4,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
         ],
       ),
     );
@@ -562,7 +523,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     
     return SafeArea(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         child: Row(
           children: [
             IconButton(
@@ -733,7 +694,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
             child: Text(
-              'Messages you send to $_peerDisplayName are secured with end-to-end encryption.',
+              'Messages to $_peerDisplayName are end-to-end encrypted.',
               style: const TextStyle(
                 fontSize: 14,
                 color: Colors.grey,
@@ -803,11 +764,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Widget _buildDateChip(String date) {
+    final c = ColonyColors.of(context);
     return Center(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: c.card,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
@@ -819,10 +781,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ),
         child: Text(
           date,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.bold,
-            color: Colors.grey,
+            color: c.secondaryText,
           ),
         ),
       ),
@@ -831,6 +793,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   Widget _buildIncomingMsg(String msg, String time, String? avatarUrl,
       {String? mediaUrl, String? mediaType}) {
+    final c = ColonyColors.of(context);
     final hasImage = mediaType == 'image' && mediaUrl != null;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -847,8 +810,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             padding: hasImage && msg.isEmpty
                 ? const EdgeInsets.all(6)
                 : const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
+            decoration: BoxDecoration(
+              color: c.card,
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(20),
                 topRight: Radius.circular(20),
@@ -879,8 +842,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 if (msg.isNotEmpty) ...[
                   if (hasImage) const SizedBox(height: 6),
                   Text(msg,
-                      style: const TextStyle(
-                        fontSize: 14, color: Color(0xFF2C3E30), height: 1.4)),
+                      style: TextStyle(
+                        fontSize: 14, color: c.primaryText, height: 1.4)),
                 ],
                 const SizedBox(height: 6),
                 Row(
@@ -997,89 +960,92 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final fieldBg = dark ? const Color(0xFF1E1E1E) : const Color(0xFFF2F7ED);
     final iconAccent = dark ? Colors.white : const Color(0xFF1E5631);
 
-    return Container(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 10,
-        bottom: MediaQuery.of(context).padding.bottom + 10,
-      ),
-      decoration: BoxDecoration(
-        color: barBg,
-        boxShadow: [
-          BoxShadow(
-            color: dark ? Colors.black54 : const Color(0x0A000000),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: _isSendingMedia ? null : _sendImageMessage,
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: fieldBg,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: _isSendingMedia
-                  ? SizedBox(
-                      width: 24, height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: iconAccent),
-                    )
-                  : Icon(Icons.image_outlined, color: iconAccent, size: 24),
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+        decoration: BoxDecoration(
+          color: barBg,
+          boxShadow: [
+            BoxShadow(
+              color: dark ? Colors.black54 : const Color(0x0A000000),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: fieldBg,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: TextField(
-                controller: _messageController,
-                maxLines: null,
-                style: TextStyle(color: c.primaryText),
-                textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(
-                  hintText: 'Type a message...',
-                  hintStyle: TextStyle(color: c.secondaryText),
-                  border: InputBorder.none,
+          ],
+        ),
+        child: Row(
+          children: [
+            GestureDetector(
+              onTap: _isSendingMedia ? null : _sendImageMessage,
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: fieldBg,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                onSubmitted: (_) => _sendMessage(),
+                child: _isSendingMedia
+                    ? SizedBox(
+                        width: 24, height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: iconAccent),
+                      )
+                    : Icon(Icons.image_outlined, color: iconAccent, size: 24),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            onTap: _isSending ? null : _sendMessage,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E5631),
-                borderRadius: BorderRadius.circular(24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: fieldBg,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.transparent),
+                ),
+                child: TextField(
+                  controller: _messageController,
+                  maxLines: null,
+                  style: TextStyle(color: c.primaryText),
+                  cursorColor: c.primaryText,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    hintText: 'Type a message...',
+                    hintStyle: TextStyle(color: c.secondaryText),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                  ),
+                  onSubmitted: (_) => _sendMessage(),
+                ),
               ),
-              child: _isSending
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
+            ),
+            const SizedBox(width: 12),
+            GestureDetector(
+              onTap: _isSending ? null : _sendMessage,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E5631),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: _isSending
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.send,
                         color: Colors.white,
-                        strokeWidth: 2,
+                        size: 24,
                       ),
-                    )
-                  : const Icon(
-                      Icons.send,
-                      color: Colors.white,
-                      size: 24,
-                    ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

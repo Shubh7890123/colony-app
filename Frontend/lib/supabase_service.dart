@@ -84,12 +84,16 @@ class SupabaseService {
   Future<UserResponse> updateProfile({
     String? displayName,
     String? avatarUrl,
+    String? username,
+    String? bannerUrl,
   }) async {
     final response = await _client.auth.updateUser(
       UserAttributes(
         data: {
           if (displayName != null) 'display_name': displayName,
           if (avatarUrl != null) 'avatar_url': avatarUrl,
+          if (username != null) 'username': username,
+          if (bannerUrl != null) 'banner_url': bannerUrl,
         },
       ),
     );

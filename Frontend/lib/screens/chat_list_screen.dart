@@ -190,25 +190,37 @@ class _ChatListScreenState extends State<ChatListScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(c),
-            const SizedBox(height: 20),
-            _buildSearchBar(c),
-            const SizedBox(height: 20),
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: CircularProgressIndicator(color: c.accent),
-                    )
-                        : Column(
-                            children: [
-                              _buildPendingWavesSection(c),
-                              Expanded(child: _buildConversationsList(c)),
-                            ],
-                          ),
-            ),
-          ],
+        child: RefreshIndicator(
+          onRefresh: () async {
+            await Future.wait([
+              _loadConversations(showSpinner: false),
+              _loadPendingWaves(showSpinner: false),
+            ]);
+          },
+          color: c.accent,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              _buildHeader(c),
+              const SizedBox(height: 20),
+              _buildSearchBar(c),
+              const SizedBox(height: 12),
+              if (_isLoading)
+                SizedBox(
+                  height: 240,
+                  child: Center(
+                    child: CircularProgressIndicator(color: c.accent),
+                  ),
+                )
+              else ...[
+                _buildPendingWavesSection(c),
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.56,
+                  child: _buildConversationsList(c),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -530,86 +542,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Icon(Icons.location_on, color: c.primaryText, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'Colony',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: c.primaryText,
-                ),
-              ),
-            ],
+          Text(
+            'Friends',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w900,
+              color: c.primaryText,
+            ),
           ),
-          Row(
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                    icon: Icon(
-                      Icons.notifications_outlined,
-                      color: c.primaryText,
-                      size: 26,
-                    ),
-                    onPressed: _openNotifications,
-                  ),
-                  if (_pendingWaves.isNotEmpty)
-                    Positioned(
-                      right: 4,
-                      top: 4,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 18,
-                          minHeight: 18,
-                        ),
-                        child: Text(
-                          _pendingWaves.length > 99
-                              ? '99+'
-                              : '${_pendingWaves.length}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(width: 4),
-              StreamBuilder<AuthState>(
-                stream: SupabaseService().client.auth.onAuthStateChange,
-                builder: (context, snapshot) {
-                  final user = snapshot.data?.session?.user;
-                  final avatarUrl = user?.userMetadata?['avatar_url'];
-                  return GestureDetector(
-                    onTap: () {
-                      if (user != null) {
-                        _navigateToUserProfile(user.id);
-                      }
-                    },
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundImage: avatarUrl != null
-                          ? NetworkImage(avatarUrl)
-                          : const NetworkImage('https://i.pravatar.cc/150'),
-                    ),
-                  );
-                },
-              ),
-            ],
+          IconButton(
+            icon: Icon(Icons.search, color: c.primaryText, size: 26),
+            onPressed: _showNewMessageSheet,
           ),
         ],
       ),

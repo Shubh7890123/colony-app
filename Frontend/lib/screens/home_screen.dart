@@ -107,8 +107,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _parseLocationParts(String locationText) {
-    // locationText is usually "SUBLOCALITY, LOCALITY, DISTRICT" in uppercase
-    final parts = locationText.split(', ');
+    final parts = locationText
+        .split(',')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
     if (parts.length >= 2) {
       // Capitalize each word properly
       _locationAreaName = _toTitleCase(parts[0]);

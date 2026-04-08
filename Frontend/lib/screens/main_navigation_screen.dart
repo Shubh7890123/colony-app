@@ -32,20 +32,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     super.dispose();
   }
 
-
-  String _getAppBarTitle(int index) {
-    switch (index) {
-      case 1:
-        return 'Groups';
-      case 2:
-        return 'Chats';
-      case 3:
-        return 'Profile';
-      default:
-        return 'Colony';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = ColonyColors.of(context);
@@ -53,29 +39,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
     return Scaffold(
       backgroundColor: c.scaffold,
-      appBar: (_currentIndex == 0)
-          ? null
-          : AppBar(
-              toolbarHeight: 50,
-              backgroundColor: c.scaffold,
-              elevation: (_currentIndex == 1) ? 0 : 1,
-              title: Text(
-                _getAppBarTitle(_currentIndex),
-                style: TextStyle(
-                  color: c.accent,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              actions: [
-                if (_currentIndex == 2)
-                  IconButton(
-                    icon: Icon(Icons.search, color: c.accent),
-                    onPressed: () {},
-                  ),
-                const SizedBox(width: 8),
-              ],
-            ),
       body: IndexedStack(
         index: _currentIndex,
         children: _screens,

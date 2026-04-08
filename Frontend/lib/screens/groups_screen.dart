@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:image_picker/image_picker.dart';
 import '../colony_theme.dart';
 import '../data_service.dart';
 import '../location_service.dart';
-import '../supabase_service.dart';
-import '../storage_service.dart';
 import 'group_chat_screen.dart';
+import 'create_group_screen.dart';
 
 class GroupsScreen extends StatefulWidget {
   const GroupsScreen({super.key});
@@ -23,7 +20,7 @@ class _GroupsScreenState extends State<GroupsScreen>
   List<NearbyGroup> _nearbyGroups = [];
   List<NearbyGroup> _myGroups = [];
   bool _isLoading = true;
-  String _locationText = 'Fetching location...';
+  String _searchQuery = '';
   double? _latitude;
   double? _longitude;
 
@@ -43,9 +40,8 @@ class _GroupsScreenState extends State<GroupsScreen>
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     final locationResult = await LocationService().fetchAndUpdateLocation();
-    if (locationResult.success && locationResult.locationText != null) {
+    if (locationResult.success) {
       setState(() {
-        _locationText = locationResult.locationText!;
         _latitude = locationResult.latitude;
         _longitude = locationResult.longitude;
       });
@@ -166,165 +162,14 @@ class _GroupsScreenState extends State<GroupsScreen>
     }
   }
 
-  void _showCreateGroupDialog() {
-    final nameController = TextEditingController();
-    final descriptionController = TextEditingController();
-    String selectedCategory = 'SOCIAL';
-    bool isPrivate = false;
-    String? coverImageUrl;
-    bool isUploadingCover = false;
-    final picker = ImagePicker();
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final dc = ColonyColors.of(context);
-          return AlertDialog(
-            title: const Text('Create New Group'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  GestureDetector(
-                    onTap: isUploadingCover
-                        ? null
-                        : () async {
-                            setDialogState(() => isUploadingCover = true);
-                            final xfile =
-                                await picker.pickImage(source: ImageSource.gallery);
-                            if (xfile != null) {
-                              try {
-                                final url =
-                                    await StorageService().uploadGroupCover(xfile);
-                                setDialogState(() => coverImageUrl = url);
-                              } catch (_) {}
-                            }
-                            setDialogState(() => isUploadingCover = false);
-                          },
-                    child: Container(
-                      height: 110,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        color: dc.card,
-                        border: Border.all(color: dc.divider.withOpacity(0.5)),
-                      ),
-                      child: coverImageUrl != null
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: Image.network(coverImageUrl!,
-                                  fit: BoxFit.cover),
-                            )
-                          : Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  isUploadingCover
-                                      ? Icons.hourglass_empty
-                                      : Icons.image_outlined,
-                                  color: dc.outlineButtonFg,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  isUploadingCover
-                                      ? 'Uploading...'
-                                      : 'Tap to add cover image',
-                                  style: TextStyle(
-                                      fontSize: 12, color: dc.secondaryText),
-                                ),
-                              ],
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                        labelText: 'Group Name',
-                        border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: descriptionController,
-                    decoration: const InputDecoration(
-                        labelText: 'Description',
-                        border: OutlineInputBorder()),
-                    maxLines: 3,
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: selectedCategory,
-                    decoration: const InputDecoration(
-                        labelText: 'Category',
-                        border: OutlineInputBorder()),
-                    items: ['SOCIAL', 'TECH', 'FITNESS', 'LIFESTYLE', 'ART', 'MUSIC', 'BUSINESS']
-                        .map((cat) => DropdownMenuItem(
-                            value: cat, child: Text(cat)))
-                        .toList(),
-                    onChanged: (value) =>
-                        setDialogState(() => selectedCategory = value!),
-                  ),
-                  const SizedBox(height: 16),
-                  SwitchListTile(
-                    value: isPrivate,
-                    onChanged: (v) => setDialogState(() => isPrivate = v),
-                    title: const Text('Private group'),
-                    subtitle: const Text(
-                        'Hidden from nearby discovery'),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (nameController.text.isEmpty) return;
-                  Navigator.pop(context);
-                  final success = await _dataService.createGroup(
-                    name: nameController.text,
-                    description: descriptionController.text,
-                    category: selectedCategory,
-                    latitude: _latitude,
-                    longitude: _longitude,
-                    coverImageUrl: coverImageUrl,
-                    isPrivate: isPrivate,
-                  );
-                  if (success) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Group created!'),
-                            backgroundColor: Colors.green),
-                      );
-                      _tabController.animateTo(1);
-                    }
-                    await _fetchGroups();
-                  } else {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Failed to create group'),
-                            backgroundColor: Colors.red),
-                      );
-                    }
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: dc.filledButtonBg,
-                  foregroundColor: dc.filledButtonFg,
-                ),
-                child: const Text('Create'),
-              ),
-            ],
-          );
-        },
-      ),
+  Future<void> _openCreateGroupScreen() async {
+    final created = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const CreateGroupScreen()),
     );
+    if (!mounted || created != true) return;
+    _tabController.animateTo(1);
+    await _fetchGroups();
   }
 
   @override
@@ -337,21 +182,35 @@ class _GroupsScreenState extends State<GroupsScreen>
           children: [
             _buildStickyHeader(c),
             Expanded(
-              child: _isLoading
-                  ? Center(child: CircularProgressIndicator(color: c.accent))
-                  : TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildNearbyGroupsList(c),
-                        _buildMyGroupsList(c),
-                      ],
-                    ),
+              child: RefreshIndicator(
+                onRefresh: _loadData,
+                color: c.accent,
+                child: _isLoading
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.5,
+                            child: Center(
+                              child: CircularProgressIndicator(color: c.accent),
+                            ),
+                          ),
+                        ],
+                      )
+                    : TabBarView(
+                        controller: _tabController,
+                        children: [
+                          _buildNearbyGroupsList(c),
+                          _buildMyGroupsList(c),
+                        ],
+                      ),
+              ),
             ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _showCreateGroupDialog,
+        onPressed: _openCreateGroupScreen,
         backgroundColor: c.fabBackground,
         elevation: 4,
         child: Icon(Icons.add, color: c.fabForeground, size: 28),
@@ -366,75 +225,41 @@ class _GroupsScreenState extends State<GroupsScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top bar: location + avatar
-          Row(
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(Icons.location_on, color: c.accent, size: 18),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        _locationText,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                          color: c.secondaryText,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: Icon(Icons.refresh, color: c.primaryText, size: 20),
-                onPressed: _loadData,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-              const SizedBox(width: 8),
-              StreamBuilder<AuthState>(
-                stream: SupabaseService().client.auth.onAuthStateChange,
-                builder: (context, snapshot) {
-                  final avatarUrl =
-                      snapshot.data?.session?.user.userMetadata?['avatar_url'];
-                  return CircleAvatar(
-                    radius: 16,
-                    backgroundImage: avatarUrl != null
-                        ? NetworkImage(avatarUrl)
-                        : const NetworkImage('https://i.pravatar.cc/150'),
-                  );
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          // Title
           Text(
-            'Discover Communities',
+            'Discover groups',
             style: TextStyle(
-              fontSize: 28,
+              fontSize: 34,
               fontWeight: FontWeight.w900,
               color: c.primaryText,
               letterSpacing: -0.8,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Find local groups and connect with your neighbors.',
-            style: TextStyle(
-              fontSize: 13,
-              color: c.secondaryText,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Premium Tab Bar
+          const SizedBox(height: 12),
+          _buildSearchBar(c),
+          const SizedBox(height: 14),
           _buildPremiumTabs(c),
           const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar(ColonyColors c) {
+    return Container(
+      decoration: BoxDecoration(
+        color: c.searchBarFill,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: c.divider.withOpacity(0.35)),
+      ),
+      child: TextField(
+        onChanged: (value) => setState(() => _searchQuery = value.trim().toLowerCase()),
+        decoration: InputDecoration(
+          hintText: 'Search groups...',
+          hintStyle: TextStyle(color: c.secondaryText),
+          prefixIcon: Icon(Icons.search, color: c.iconMuted),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        ),
       ),
     );
   }
@@ -502,7 +327,13 @@ class _GroupsScreenState extends State<GroupsScreen>
   }
 
   Widget _buildNearbyGroupsList(ColonyColors c) {
-    if (_nearbyGroups.isEmpty) {
+    final filtered = _nearbyGroups.where((g) {
+      if (_searchQuery.isEmpty) return true;
+      return g.name.toLowerCase().contains(_searchQuery) ||
+          (g.description?.toLowerCase().contains(_searchQuery) ?? false);
+    }).toList();
+
+    if (filtered.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -535,7 +366,7 @@ class _GroupsScreenState extends State<GroupsScreen>
               ),
               const SizedBox(height: 24),
               ElevatedButton.icon(
-                onPressed: _showCreateGroupDialog,
+                onPressed: _openCreateGroupScreen,
                 icon: const Icon(Icons.add),
                 label: const Text('Create Group'),
                 style: ElevatedButton.styleFrom(
@@ -554,14 +385,20 @@ class _GroupsScreenState extends State<GroupsScreen>
     }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      itemCount: _nearbyGroups.length,
+      itemCount: filtered.length,
       itemBuilder: (context, index) =>
-          _buildGroupCard(c, _nearbyGroups[index]),
+          _buildGroupCard(c, filtered[index]),
     );
   }
 
   Widget _buildMyGroupsList(ColonyColors c) {
-    if (_myGroups.isEmpty) {
+    final filtered = _myGroups.where((g) {
+      if (_searchQuery.isEmpty) return true;
+      return g.name.toLowerCase().contains(_searchQuery) ||
+          (g.description?.toLowerCase().contains(_searchQuery) ?? false);
+    }).toList();
+
+    if (filtered.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -612,9 +449,9 @@ class _GroupsScreenState extends State<GroupsScreen>
     }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      itemCount: _myGroups.length,
+      itemCount: filtered.length,
       itemBuilder: (context, index) =>
-          _buildGroupCard(c, _myGroups[index], isMyGroup: true),
+          _buildGroupCard(c, filtered[index], isMyGroup: true),
     );
   }
 

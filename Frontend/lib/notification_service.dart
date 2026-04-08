@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -97,6 +98,13 @@ class NotificationService {
         provisional: false,
       );
     }
+    if (Platform.isAndroid) {
+      await _messaging.requestPermission(alert: true, badge: true, sound: true);
+      await _localNotifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    }
 
     // Request local notification permissions
     await _localNotifications
@@ -120,11 +128,17 @@ class NotificationService {
       final user = _client.auth.currentUser;
       if (user == null) return;
 
+      final deviceType = Platform.isAndroid ? 'android' : (Platform.isIOS ? 'ios' : 'other');
+      // Stable enough per install + token family, avoids single-device overwrite.
+      final deviceId = '$deviceType-${token.substring(0, min(24, token.length))}';
+
       await _client.from('user_fcm_tokens').upsert({
         'user_id': user.id,
         'fcm_token': token,
+        'device_type': deviceType,
+        'device_id': deviceId,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
-      }, onConflict: 'user_id');
+      }, onConflict: 'user_id,device_id');
       
       print('FCM token saved to database');
     } catch (e) {

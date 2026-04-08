@@ -864,6 +864,7 @@ class DataService {
 
   Future<bool> updateProfile({
     String? displayName,
+    String? username,
     String? bio,
     String? avatarUrl,
   }) async {
@@ -873,6 +874,7 @@ class DataService {
 
       final updates = <String, dynamic>{};
       if (displayName != null) updates['display_name'] = displayName;
+      if (username != null) updates['username'] = username;
       if (bio != null) updates['bio'] = bio;
       if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
 

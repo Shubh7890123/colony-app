@@ -18,7 +18,9 @@ This guide explains how to deploy Supabase Edge Functions for the Colony app.
 **Required Environment Variables**:
 - `SUPABASE_URL` - Your Supabase project URL
 - `SUPABASE_SERVICE_ROLE_KEY` - Your Supabase service role key
-- `FCM_SERVER_KEY` - Your Firebase Cloud Messaging server key
+- `FIREBASE_PROJECT_ID` - Firebase project id
+- `FIREBASE_CLIENT_EMAIL` - Service account client email
+- `FIREBASE_PRIVATE_KEY` - Service account private key (`\n` escaped is fine)
 
 ## Deployment Steps
 
@@ -50,7 +52,9 @@ After deployment, set the environment variables in your Supabase dashboard:
 4. Add the following variables:
    - `SUPABASE_URL`: `https://hicfazehsmeyobrasaie.supabase.co`
    - `SUPABASE_SERVICE_ROLE_KEY`: Your service role key (from Supabase dashboard > Settings > API)
-   - `FCM_SERVER_KEY`: Your FCM server key (from Firebase Console > Project Settings > Cloud Messaging)
+   - `FIREBASE_PROJECT_ID`: from service account JSON (`project_id`)
+   - `FIREBASE_CLIENT_EMAIL`: from service account JSON (`client_email`)
+   - `FIREBASE_PRIVATE_KEY`: from service account JSON (`private_key`)
 
 ## Testing the Edge Function
 

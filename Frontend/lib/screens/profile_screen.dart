@@ -8,6 +8,7 @@ import '../data_service.dart';
 import '../location_service.dart';
 import '../storage_service.dart';
 import '../theme_controller.dart';
+import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -64,22 +65,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       backgroundColor: c.scaffold,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          child: Column(
+        child: RefreshIndicator(
+          onRefresh: _loadProfileData,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             children: [
               _buildHeader(context, c),
-              const SizedBox(height: 30),
-              _buildProfileHeader(c),
               const SizedBox(height: 20),
+              _buildProfileHeader(c),
+              const SizedBox(height: 18),
               _buildActionButtons(context, c),
-              const SizedBox(height: 30),
+              const SizedBox(height: 24),
               _buildStatsRow(c),
-              const SizedBox(height: 30),
-              _buildLocationInfo(c),
-              const SizedBox(height: 30),
+              const SizedBox(height: 24),
               _buildLogoutButton(context),
-              const SizedBox(height: 80), // Padding for bottom nav
+              const SizedBox(height: 80),
             ],
           ),
         ),
@@ -91,28 +92,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Expanded(
-          child: Row(
-            children: [
-              Icon(Icons.location_on, color: c.accent, size: 18),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  _locationText,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: c.accent,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+        Text(
+          'Profile',
+          style: TextStyle(
+            fontSize: 36,
+            fontWeight: FontWeight.w900,
+            color: c.primaryText,
           ),
-        ),
-        IconButton(
-          icon: Icon(Icons.refresh, color: c.primaryText),
-          onPressed: _loadProfileData,
         ),
         IconButton(
           icon: Icon(Icons.settings, color: c.primaryText),
@@ -168,7 +154,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     'Edit Profile',
                     () {
                       Navigator.pop(sheetCtx);
-                      _showEditProfileDialog(context);
+                      _openEditProfileScreen();
                     },
                     c,
                   ),
@@ -377,84 +363,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  void _showEditProfileDialog(BuildContext context) {
-    final displayNameController = TextEditingController(
-      text: _userProfile?.displayName ?? '',
-    );
-    final bioController = TextEditingController(
-      text: _userProfile?.bio ?? '',
-    );
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Profile'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: displayNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Display Name',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: bioController,
-                decoration: const InputDecoration(
-                  labelText: 'Bio',
-                  border: OutlineInputBorder(),
-                ),
-                maxLines: 3,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              
-              final success = await _dataService.updateProfile(
-                displayName: displayNameController.text.isNotEmpty 
-                    ? displayNameController.text 
-                    : null,
-                bio: bioController.text.isNotEmpty 
-                    ? bioController.text 
-                    : null,
-              );
-              
-              if (success && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Profile updated successfully!'),
-                    backgroundColor: Color(0xFF2E6B3B),
-                  ),
-                );
-                _loadProfileData();
-              } else if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Failed to update profile'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1B5A27),
-            ),
-            child: const Text('Save'),
-          ),
-        ],
+  Future<void> _openEditProfileScreen() async {
+    final didUpdate = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditProfileScreen(initialProfile: _userProfile),
       ),
     );
+    if (didUpdate == true && mounted) {
+      _loadProfileData();
+    }
   }
 
   Widget _buildSettingsTile(
@@ -576,67 +494,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final username = _userProfile?.username ??
             user?.userMetadata?['username'] ??
             '@${user?.email?.split('@').first ?? 'user'}';
-        final email = user?.email ?? 'user@example.com';
         final avatarUrl = _userProfile?.avatarUrl ?? 
             user?.userMetadata?['avatar_url'];
+        final bannerUrl = (user?.userMetadata?['banner_url'])?.toString();
         final bio = _userProfile?.bio;
 
-        return Column(
+        return Container(
+          decoration: BoxDecoration(
+            color: c.card,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: c.divider.withOpacity(0.35)),
+          ),
+          padding: const EdgeInsets.only(bottom: 20),
+          clipBehavior: Clip.antiAlias,
           children: [
-            Stack(
-              children: [
-                Container(
-                  width: 120,
-                  height: 120,
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: Theme.of(context).brightness == Brightness.dark
-                          ? [const Color(0xFF444444), const Color(0xFF888888)]
-                          : const [Color(0xFFF17F36), Color(0xFF2E6B3B)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+            SizedBox(
+              height: 140,
+              width: double.infinity,
+              child: bannerUrl != null
+                  ? Image.network(bannerUrl, fit: BoxFit.cover)
+                  : Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF2A2A2A), Color(0xFF101010)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
                     ),
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: c.scaffold,
-                      shape: BoxShape.circle,
-                    ),
-                    padding: const EdgeInsets.all(3),
-                    child: CircleAvatar(
+            ),
+            Transform.translate(
+              offset: const Offset(0, -36),
+              child: Center(
+                child: Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 46,
                       backgroundImage: avatarUrl != null
                           ? NetworkImage(avatarUrl)
                           : const NetworkImage('https://i.pravatar.cc/150'),
                     ),
-                  ),
-                ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: GestureDetector(
-                    onTap: () => _showAvatarPickSheet(context, c),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? const Color(0xFF1E1E1E)
-                            : const Color(0xFF14471E),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: c.scaffold, width: 3),
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: GestureDetector(
+                        onTap: () => _showAvatarPickSheet(context, c),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: c.scaffold,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.edit, color: c.primaryText, size: 16),
+                        ),
                       ),
-                      child: const Icon(Icons.edit, color: Colors.white, size: 16),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
-            const SizedBox(height: 16),
             Text(
               displayName,
               style: TextStyle(
-                fontSize: 28,
+                fontSize: 32,
                 fontWeight: FontWeight.w900,
                 color: c.primaryText,
               ),
@@ -650,36 +570,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.email_outlined, color: c.secondaryText, size: 14),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    email,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: c.secondaryText,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ],
-            ),
             if (bio != null && bio.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Text(
-                bio,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: c.primaryText,
-                  fontStyle: FontStyle.italic,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  bio,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: c.primaryText,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
               ),
             ],
           ],
@@ -767,7 +669,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       children: [
         Expanded(
           child: ElevatedButton(
-            onPressed: () => _showEditProfileDialog(context),
+            onPressed: _openEditProfileScreen,
             style: ElevatedButton.styleFrom(
               backgroundColor:
                   dark ? const Color(0xFF1E1E1E) : const Color(0xFF1A5822),
@@ -852,83 +754,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       height: 30,
       width: 1,
       color: c.divider,
-    );
-  }
-
-  Widget _buildLocationInfo(ColonyColors c) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: c.pillBackground,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              Icons.location_on,
-              color: c.accent,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Your Location',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: c.primaryText,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _locationText,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: c.secondaryText,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: () async {
-              final result = await LocationService().fetchAndUpdateLocation();
-              if (result.success) {
-                _loadProfileData();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('Location updated!'),
-                      backgroundColor: Theme.of(context).brightness ==
-                              Brightness.dark
-                          ? const Color(0xFF1E1E1E)
-                          : const Color(0xFF2E6B3B),
-                    ),
-                  );
-                }
-              }
-            },
-            child: Text(
-              'Update',
-              style: TextStyle(
-                color: c.accent,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
